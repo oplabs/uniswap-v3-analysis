@@ -26,7 +26,8 @@ fee = 0.0001 #0.01%
 net_usdc_fee = 0
 net_usdt_fee = 0
 
-token_id_ticks_map = {}
+block_tx_map = {}
+token_id_mint_map = {}
 
 last_mint = {}
 
@@ -36,47 +37,51 @@ async def collect():
       pool,
       event_name='Swap',
       end_block='16642500',
-      # include_timestamps=True,
     ),
     ctc.async_get_events(
       pool,
       event_name='Mint',
       end_block='16642500',
-      # include_timestamps=True,
     ),
     ctc.async_get_events(
       pool,
       event_name='Burn',
       end_block='16642500',
-      # include_timestamps=True,
     ),
     ctc.async_get_events(
       nftManager,
       event_name='IncreaseLiquidity',
       end_block='16642500',
-      # include_timestamps=True,
     ),
     ctc.async_get_events(
       nftManager,
       event_name='DecreaseLiquidity',
       end_block='16642500',
-      # include_timestamps=True,
     ),
   )
+
+  swaps = pd.DataFrame(swaps.to_records())
+  mints = pd.DataFrame(mints.to_records())
+  burns = pd.DataFrame(burns.to_records())
+  increases = pd.DataFrame(increases.to_records())
+  decreases = pd.DataFrame(decreases.to_records())
 
   return pd.concat(
     [swaps, mints, burns, increases, decreases]
   ).sort_values(
-    by=['block_number', 'transaction_hash', 'log_index'],
+    by=['block_number', 'transaction_index', 'log_index'],
     ascending=True,
+    ignore_index=True,
   )
 
-def handle_mint_event(event, skip_tagging_mint=False):
+def handle_mint_event(event):
   global net_liquidity
   lower_tick = int(event["arg__tickLower"])
   upper_tick = int(event["arg__tickUpper"])
   liquidity_added = event["arg__amount"]
   owner = event["arg__owner"]
+  block_number = event["block_number"]
+  transaction_hash = event["transaction_hash"]
 
   total_ticks = upper_tick - lower_tick + 1
   liquidity_per_tick = liquidity_added / total_ticks
@@ -100,8 +105,11 @@ def handle_mint_event(event, skip_tagging_mint=False):
 
     ticks[key] = tick
 
-  if not skip_tagging_mint:
-    last_mint = event
+  mkey_prefix = str(block_number) + "_" + str(transaction_hash)
+  block_tx_map[mkey_prefix + "_last_mint"] = event
+  token_id = block_tx_map.get(mkey_prefix + "_token_id")
+  if token_id is not None and token_id_mint_map.get(token_id) is None:
+    token_id_mint_map[token_id] = event
 
   return
 
@@ -217,25 +225,32 @@ def handle_swap_event(event):
 
 def handle_increase_event(event):
   token_id = str(event["arg__tokenId"])
+  block_number = event["block_number"]
+  transaction_hash = event["transaction_hash"]
 
-  print(event)
+  token_key = str(block_number) + "_" + str(transaction_hash) + "_token_id"
+  block_tx_map[token_key] = token_id
+  mint_event = token_id_mint_map.get(token_id)
 
-  if last_mint["block_number"] == event["block_number"] and last_mint["transaction_hash"] == event["transaction_hash"]:
+  mkey = str(block_number) + "_" + str(transaction_hash) + "_last_mint"
+  if block_tx_map.get(mkey) is None:
     # IncreaseLiquidity also fires with Mints, ignore if already processed
-    # Just map the tokenId
-    token_id_ticks_map[token_id] = last_mint
     return
 
-  mint_event = token_id_ticks_map[token_id]
+  if mint_event is None:
+    return
 
   mint_event['arg__amount'] = event['arg__liquidity']
 
-  handle_mint_event(mint_event, skip_tagging_mint=True)
+  handle_mint_event(mint_eventTrue)
 
 def handle_decrease_event(event):
   token_id = str(event["arg__tokenId"])
 
-  mint_event = token_id_ticks_map[token_id]
+  mint_event = token_id_mint_map.get(token_id)
+
+  if mint_event is None:
+
 
   mint_event['arg__amount'] = event['arg__liquidity']
 
@@ -249,6 +264,8 @@ async def main():
   pct5 = math.floor(5 * total / 100)
 
   print("Loaded {} events, processing them now".format(total))
+
+  print(data.head())
 
   for index, event in data.iterrows():
     if event["event_name"] == "Mint":
@@ -269,7 +286,7 @@ async def main():
 
     # if (processed / pct5) >= 2:
     #   break
-  #   #   # sys.exit(1)
+    #   # sys.exit(1)
 
   print("-------------------")
   print("Done!")
