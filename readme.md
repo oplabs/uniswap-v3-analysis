@@ -3,15 +3,11 @@
 pip3 install ctc && ctc config
 ```
 
-## Data collection
-
-```
-python3 collect.py
-```
-
 ## Simulation
+Update input file `input.csv` and then run:
+
 ```
-# TODO
+python3 simulate.py
 ```
 
 ## Plan
@@ -25,7 +21,6 @@ Burn/DecreaseLiquidity:
   - Identify number of ticks between amount0 and amount1 (N)
   - Note liquidity (L)
   - Split liquidity over the ticks (L/N)
-
 
 Swap:
   - Find USDC/USDT split
