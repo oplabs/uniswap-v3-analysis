@@ -160,6 +160,27 @@ def handle_transfer_event(transfer_event):
 def handle_burn_event(event):
   return
 
+def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
+  tick = ticks.get(str(tick_index), {
+    'liquidity': 0,
+    'positions': {}
+  })
+
+  tick_liquidity = int(tick['liquidity'])
+  if tick_liquidity > 0:
+    for addr in tick['positions'].keys():
+      lp_provider = lp_providers.get(addr, {
+        "usdc_profit": 0,
+        "usdt_profit": 0
+      })
+
+      provided_liquidity = int(tick['positions'][addr]['liquidity'])
+      lp_provider["usdc_profit"] += (usdc_fee * provided_liquidity / tick_liquidity)
+      lp_provider["usdt_profit"] += (usdt_fee * provided_liquidity / tick_liquidity)
+
+      lp_providers[addr] = lp_provider
+
+
 def handle_swap_event(event):
   global net_liquidity
   global net_usdc_fee
@@ -183,23 +204,7 @@ def handle_swap_event(event):
   net_usdt_fee += usdt_fee
 
   if not is_multi_tick:
-    tick = ticks.get(str(curr_tick), {
-      'liquidity': 0,
-      'positions': {}
-    })
-
-    if tick["liquidity"] > 0:
-      for addr in tick['positions'].keys():
-        provided_liquidity = tick['positions'][addr]['liquidity']
-        lp_provider = lp_providers.get(addr, {
-          "usdc_profit": 0,
-          "usdt_profit": 0
-        })
-
-        lp_provider["usdc_profit"] += (usdc_fee * provided_liquidity / tick["liquidity"])
-        lp_provider["usdt_profit"] += (usdt_fee * provided_liquidity / tick["liquidity"])
-
-        lp_providers[addr] = lp_provider
+    distribute_fee_to_tick(curr_tick, usdc_fee, usdt_fee)
 
   else:
     direction = last_tick < curr_tick # True for forward
@@ -209,26 +214,7 @@ def handle_swap_event(event):
     usdt_fee_per_tick = usdt_fee / total_ticks
 
     for tick in range(min(last_tick, curr_tick), max(last_tick, curr_tick) + 1):
-      key = str(tick)
-      tick = ticks.get(key, {
-        'liquidity': 0,
-        'positions': {}
-      })
-
-      if tick['liquidity'] <= 0:
-        continue
-
-      for addr in tick['positions'].keys():
-        provided_liquidity = tick['positions'][addr]['liquidity']
-        lp_provider = lp_providers.get(addr, {
-          "usdc_profit": 0,
-          "usdt_profit": 0
-        })
-
-        lp_provider["usdc_profit"] += (usdc_fee_per_tick * provided_liquidity / tick["liquidity"])
-        lp_provider["usdt_profit"] += (usdt_fee_per_tick * provided_liquidity / tick["liquidity"])
-
-      lp_providers[addr] = lp_provider
+      distribute_fee_to_tick(str(tick), usdc_fee_per_tick, usdt_fee_per_tick)
         
   if last_tick != curr_tick:
     # TODO: handle simulations here
@@ -237,12 +223,12 @@ def handle_swap_event(event):
 
 def handle_increase_event(event):
   token_id = str(event["arg__tokenId"])
-  liquidity_added = event['arg__liquidity']
+  liquidity_added = int(event['arg__liquidity'])
   increase_liquidity(token_id, liquidity_added)
 
 def handle_decrease_event(event):
   token_id = str(event["arg__tokenId"])
-  liquidity_removed = event['arg__liquidity']
+  liquidity_removed = int(event['arg__liquidity'])
   decrease_liquidity(token_id, liquidity_removed)
 
 async def main():
