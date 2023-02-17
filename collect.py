@@ -39,7 +39,7 @@ end_block = "16642500"
 async def collect():
   global start_block
   global end_block
-  swaps, mints, burns, increases, decreases, transfers = await asyncio.gather(  
+  swaps, mints, increases, decreases, transfers = await asyncio.gather(  
     ctc.async_get_events(
       pool,
       event_name='Swap',
@@ -49,12 +49,6 @@ async def collect():
     ctc.async_get_events(
       pool,
       event_name='Mint',
-      start_block=start_block,
-      end_block=end_block,
-    ),
-    ctc.async_get_events(
-      pool,
-      event_name='Burn',
       start_block=start_block,
       end_block=end_block,
     ),
@@ -80,14 +74,13 @@ async def collect():
 
   swaps = pd.DataFrame(swaps.to_records())
   mints = pd.DataFrame(mints.to_records())
-  burns = pd.DataFrame(burns.to_records())
   increases = pd.DataFrame(increases.to_records())
   decreases = pd.DataFrame(decreases.to_records())
   transfers = pd.DataFrame(transfers.to_records())
   transfers = transfers[transfers["arg__from"] == "0x0000000000000000000000000000000000000000"]
 
   return pd.concat(
-    [swaps, mints, burns, increases, decreases, transfers]
+    [swaps, mints, increases, decreases, transfers]
   ).sort_values(
     by=['block_number', 'transaction_index', 'log_index'],
     ascending=True,
@@ -115,6 +108,14 @@ def update_liquidity(token_id, liquidity_change, direction=1):
   liquidity_per_tick = liquidity_change / total_ticks
 
   net_liquidity += (liquidity_change * direction)
+
+  lp_provider = lp_providers.get(provider, {
+    "net_liquidity": 0,
+    "usdc_profit": 0,
+    "usdt_profit": 0
+  })
+  lp_provider["net_liquidity"] += (liquidity_change * direction)
+  lp_providers[provider] = lp_provider
 
   for i in range(total_ticks+1):
     key = str(lower_tick + i)
@@ -170,6 +171,7 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
   if tick_liquidity > 0:
     for addr in tick['positions'].keys():
       lp_provider = lp_providers.get(addr, {
+        "net_liquidity": 0,
         "usdc_profit": 0,
         "usdt_profit": 0
       })
@@ -197,8 +199,8 @@ def handle_swap_event(event):
   first_swap = last_tick is None 
   is_multi_tick = last_tick != curr_tick and not first_swap
 
-  usdc_fee = amount0 * fee
-  usdt_fee = amount1 * fee
+  usdc_fee = abs(amount0) * fee
+  usdt_fee = abs(amount1) * fee
   
   net_usdc_fee += usdc_fee
   net_usdt_fee += usdt_fee
@@ -265,7 +267,6 @@ async def main():
     #   break
     #   # sys.exit(1)
 
-  print(lp_providers.get("0x58890A9cB27586E83Cb51d2d26bbE18a1a647245"))
   print(lp_providers.get("0x58890A9cB27586E83Cb51d2d26bbE18a1a647245".lower()))
 
   print("-------------------")
