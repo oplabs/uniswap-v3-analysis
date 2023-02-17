@@ -245,24 +245,48 @@ def handle_decrease_event(event):
 def find_tick_index(price):
   return round(math.log(price, 1.0001))
 
-def find_token_split(deposit_amount):
+def get_sqrt_ratio_at_tick(tick_index):
+  return math.sqrt(1.0001 ** tick_index) # * 2**96
+
+def get_liquidity_for_amount0(ratio_a, ratio_b, liquidity):
+  if ratio_a > ratio_b: 
+    (ratio_a, ratio_b) = (ratio_b, ratio_a)
+  
+  return math.floor(liquidity * (ratio_b - ratio_a) / ratio_b) / ratio_a
+
+def get_liquidity_for_amount1(ratio_a, ratio_b, liquidity):
+  if ratio_a > ratio_b: 
+    (ratio_a, ratio_b) = (ratio_b, ratio_a)
+  
+  return math.floor(liquidity * (ratio_b - ratio_a))
+
+def find_token_split(deposit_amount, lower_tick, upper_tick):
   global latest_price
   global latest_price_x96
 
-  if latest_price is None:
-    # First event?
-    usdc_amount = math.floor(deposit_amount / 2)
-    usdt_amount = usdc_amount
-    liquidity = math.floor(10**6 * math.sqrt(usdt_amount * usdc_amount)) # Same as sqrt(10**6 * x * 10**6 * y)
-    return (usdc_amount, usdt_amount, liquidity)
+  sqrt_ratio_curr = latest_price_x96 / 2**96
+  sqrt_ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+  sqrt_ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
+  if sqrt_ratio_a > sqrt_ratio_b:
+    (sqrt_ratio_a, sqrt_ratio_b) = (sqrt_ratio_b, sqrt_ratio_a)
 
-  usdc_amount = math.floor(10**6 * (latest_price * deposit_amount/2))
-  usdt_amount = (deposit_amount * 10**6) - usdc_amount
+  liquidity = 0
 
-  liquidity = math.floor(math.sqrt(usdc_amount * usdt_amount))
+  deposit_amount_adjusted = deposit_amount * 10**6
 
-  return (usdc_amount, usdt_amount, liquidity)
+  if sqrt_ratio_curr <= sqrt_ratio_a:
+    liquidity = get_liquidity_for_amount0(sqrt_ratio_a, sqrt_ratio_b, deposit_amount_adjusted)
+  elif sqrt_ratio_curr < sqrt_ratio_b:
+    liquidity0 = get_liquidity_for_amount0(sqrt_ratio_curr, sqrt_ratio_b, deposit_amount_adjusted)
+    liquidity1 = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_curr, deposit_amount_adjusted)
+    liquidity = liquidity0 if liquidity0 < liquidity1 else liquidity1
+  else:
+    liquidity = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_b, deposit_amount_adjusted)
+
+  liquidity = math.floor(liquidity)
+
+  return (0, 0, liquidity)
 
 def print_profits(address):
   data = lp_providers.get(address.lower())
@@ -294,22 +318,24 @@ def handle_sims(block_number):
     deposit_amount = sim["deposit_amount"]
     lower_tick = sim["lower_tick"]
     upper_tick = sim["upper_tick"]
+    lower_tick_index = find_tick_index(lower_tick)
+    upper_tick_index = find_tick_index(upper_tick)
 
     if address not in deposited_sims and (deposit_after == 0 or deposit_after >= block_number):
-      (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount)
+      (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount, lower_tick_index, upper_tick_index)
 
       print("Adding liquidity for simulated address {}:".format(address))
-      print("\tUSDC       : {}".format(usdc_amount / 10**6))
-      print("\tUSDT       : {}".format(usdc_amount / 10**6))
+      # print("\tUSDC       : {}".format(usdc_amount / 10**6))
+      # print("\tUSDT       : {}".format(usdt_amount / 10**6))
       print("\tLiquidity  : {}".format(liquidity))
-      print("\tLower tick : {} ({})".format(find_tick_index(lower_tick), lower_tick))
-      print("\tUpper tick : {} ({})".format(find_tick_index(upper_tick), upper_tick))
+      print("\tLower tick : {} ({})".format(lower_tick_index, lower_tick))
+      print("\tUpper tick : {} ({})".format(upper_tick_index, upper_tick))
 
       deposited_sims = deposited_sims | set([address])
 
       event = {
-        "arg__tickLower": find_tick_index(lower_tick),
-        "arg__tickUpper": find_tick_index(upper_tick),
+        "arg__tickLower": lower_tick_index,
+        "arg__tickUpper": upper_tick_index,
       }
 
       token_id_mint_map[token_id] = event
@@ -321,11 +347,11 @@ def handle_sims(block_number):
       (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount)
 
       print("Removing liquidity for simulated address {}:".format(address))
-      print("\tUSDC       : {}".format(usdc_amount / 10**6))
-      print("\tUSDT       : {}".format(usdc_amount / 10**6))
+      # print("\tUSDC       : {}".format(usdc_amount / 10**6))
+      # print("\tUSDT       : {}".format(usdt_amount / 10**6))
       print("\tLiquidity  : {}".format(liquidity))
-      print("\tLower tick : {} ({})".format(find_tick_index(lower_tick), lower_tick))
-      print("\tUpper tick : {} ({})".format(find_tick_index(upper_tick), upper_tick))
+      print("\tLower tick : {} ({})".format(lower_tick_index, lower_tick))
+      print("\tUpper tick : {} ({})".format(upper_tick_index, upper_tick))
 
       withdrawn_sims = withdrawn_sims | set([address])
 
