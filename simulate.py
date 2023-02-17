@@ -425,9 +425,6 @@ async def main():
   for sim in simulations:
     print_profits(sim["address"])
 
-  print_profits("0x58890A9cB27586E83Cb51d2d26bbE18a1a647245")
-
-  print("-------------------")
   print("Done!")
 
 asyncio.run(main())
