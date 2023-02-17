@@ -26,37 +26,55 @@ fee = 0.0001 #0.01%
 net_usdc_fee = 0
 net_usdt_fee = 0
 
-block_tx_map = {}
+mint_ev_map = {}
+token_id_owner_map = {}
 token_id_mint_map = {}
 
-last_mint = {}
+start_block = "13609065"
+end_block = "16642500"
+
+# start_block = "16539882"
+# end_block = "16539884"
 
 async def collect():
-  swaps, mints, burns, increases, decreases = await asyncio.gather(  
+  global start_block
+  global end_block
+  swaps, mints, burns, increases, decreases, transfers = await asyncio.gather(  
     ctc.async_get_events(
       pool,
       event_name='Swap',
-      end_block='16642500',
+      start_block=start_block,
+      end_block=end_block,
     ),
     ctc.async_get_events(
       pool,
       event_name='Mint',
-      end_block='16642500',
+      start_block=start_block,
+      end_block=end_block,
     ),
     ctc.async_get_events(
       pool,
       event_name='Burn',
-      end_block='16642500',
+      start_block=start_block,
+      end_block=end_block,
     ),
     ctc.async_get_events(
       nftManager,
       event_name='IncreaseLiquidity',
-      end_block='16642500',
+      start_block=start_block,
+      end_block=end_block,
     ),
     ctc.async_get_events(
       nftManager,
       event_name='DecreaseLiquidity',
-      end_block='16642500',
+      start_block=start_block,
+      end_block=end_block,
+    ),
+    ctc.async_get_events(
+      nftManager,
+      event_name='Transfer',
+      start_block=start_block,
+      end_block=end_block,
     ),
   )
 
@@ -65,9 +83,11 @@ async def collect():
   burns = pd.DataFrame(burns.to_records())
   increases = pd.DataFrame(increases.to_records())
   decreases = pd.DataFrame(decreases.to_records())
+  transfers = pd.DataFrame(transfers.to_records())
+  transfers = transfers[transfers["arg__from"] == "0x0000000000000000000000000000000000000000"]
 
   return pd.concat(
-    [swaps, mints, burns, increases, decreases]
+    [swaps, mints, burns, increases, decreases, transfers]
   ).sort_values(
     by=['block_number', 'transaction_index', 'log_index'],
     ascending=True,
@@ -75,18 +95,26 @@ async def collect():
   )
 
 def handle_mint_event(event):
+  key = event["block_hash"] + "_" + event["transaction_hash"]
+  mint_ev_map[key] = event
+
+def update_liquidity(token_id, liquidity_change, direction=1):
   global net_liquidity
+
+  event = token_id_mint_map.get(token_id)
+  provider = str(token_id_owner_map.get(token_id)).lower()
+
+  if event is None or provider is None:
+    # Unknown event?
+    return
+
   lower_tick = int(event["arg__tickLower"])
   upper_tick = int(event["arg__tickUpper"])
-  liquidity_added = event["arg__amount"]
-  owner = event["arg__owner"]
-  block_number = event["block_number"]
-  transaction_hash = event["transaction_hash"]
 
   total_ticks = upper_tick - lower_tick + 1
-  liquidity_per_tick = liquidity_added / total_ticks
+  liquidity_per_tick = liquidity_change / total_ticks
 
-  net_liquidity += liquidity_added
+  net_liquidity += (liquidity_change * direction)
 
   for i in range(total_ticks+1):
     key = str(lower_tick + i)
@@ -95,54 +123,41 @@ def handle_mint_event(event):
       'positions': {}
     })
 
-    pos = tick['positions'].get(owner, {
+    pos = tick['positions'].get(provider, {
       'liquidity': 0
     })
-    pos['liquidity'] += liquidity_per_tick
-    tick['positions'][owner] = pos
+    pos['liquidity'] += (liquidity_per_tick * direction)
+    tick['positions'][provider] = pos
 
-    tick['liquidity'] += liquidity_per_tick
+    tick['liquidity'] += (liquidity_per_tick * direction)
 
     ticks[key] = tick
 
-  mkey_prefix = str(block_number) + "_" + str(transaction_hash)
-  block_tx_map[mkey_prefix + "_last_mint"] = event
-  token_id = block_tx_map.get(mkey_prefix + "_token_id")
-  if token_id is not None and token_id_mint_map.get(token_id) is None:
-    token_id_mint_map[token_id] = event
+def increase_liquidity(token_id, liquidity_added):
+  update_liquidity(token_id, liquidity_added, 1)
 
-  return
+def decrease_liquidity(token_id, liquidity_removed):
+  update_liquidity(token_id, liquidity_removed, -1)
+
+def handle_transfer_event(transfer_event):
+  block_hash = transfer_event["block_hash"]
+  transaction_hash = transfer_event["transaction_hash"]
+
+  key = block_hash + "_" + transaction_hash
+  event = mint_ev_map.get(key)
+
+  if event is None:
+    # Probably not from USDT<>USDC pool
+    return
+
+  provider = transfer_event["arg__to"].lower()
+  token_id = str(transfer_event["arg__tokenId"])
+
+  token_id_owner_map[token_id] = provider
+  token_id_mint_map[token_id] = event
+  del mint_ev_map[key]
 
 def handle_burn_event(event):
-  global net_liquidity
-
-  lower_tick = int(event["arg__tickLower"])
-  upper_tick = int(event["arg__tickUpper"])
-  liquidity_removed = event["arg__amount"]
-  owner = event["arg__owner"]
-
-  total_ticks = upper_tick - lower_tick + 1
-  liquidity_per_tick = liquidity_removed / total_ticks
-
-  net_liquidity -= liquidity_removed
-
-  for i in range(total_ticks+1):
-    key = str(lower_tick + i)
-    tick = ticks.get(key, {
-      'liquidity': 0,
-      'positions': {}
-    })
-
-    pos = tick['positions'].get(owner, {
-      'liquidity': 0
-    })
-    pos['liquidity'] -= liquidity_per_tick
-    tick['positions'][owner] = pos
-
-    tick['liquidity'] -= liquidity_per_tick
-
-    ticks[key] = tick
-
   return
 
 def handle_swap_event(event):
@@ -189,8 +204,6 @@ def handle_swap_event(event):
   else:
     direction = last_tick < curr_tick # True for forward
 
-    # mid_tick_liquidity = 0
-
     total_ticks = max(last_tick, curr_tick) - min(last_tick, curr_tick) + 1
     usdc_fee_per_tick = usdc_fee / total_ticks
     usdt_fee_per_tick = usdt_fee / total_ticks
@@ -204,7 +217,6 @@ def handle_swap_event(event):
 
       if tick['liquidity'] <= 0:
         continue
-      # mid_tick_liquidity += tick['liquidity']
 
       for addr in tick['positions'].keys():
         provided_liquidity = tick['positions'][addr]['liquidity']
@@ -225,36 +237,13 @@ def handle_swap_event(event):
 
 def handle_increase_event(event):
   token_id = str(event["arg__tokenId"])
-  block_number = event["block_number"]
-  transaction_hash = event["transaction_hash"]
-
-  token_key = str(block_number) + "_" + str(transaction_hash) + "_token_id"
-  block_tx_map[token_key] = token_id
-  mint_event = token_id_mint_map.get(token_id)
-
-  mkey = str(block_number) + "_" + str(transaction_hash) + "_last_mint"
-  if block_tx_map.get(mkey) is None:
-    # IncreaseLiquidity also fires with Mints, ignore if already processed
-    return
-
-  if mint_event is None:
-    return
-
-  mint_event['arg__amount'] = event['arg__liquidity']
-
-  handle_mint_event(mint_eventTrue)
+  liquidity_added = event['arg__liquidity']
+  increase_liquidity(token_id, liquidity_added)
 
 def handle_decrease_event(event):
   token_id = str(event["arg__tokenId"])
-
-  mint_event = token_id_mint_map.get(token_id)
-
-  if mint_event is None:
-
-
-  mint_event['arg__amount'] = event['arg__liquidity']
-
-  handle_burn_event(mint_event)
+  liquidity_removed = event['arg__liquidity']
+  decrease_liquidity(token_id, liquidity_removed)
 
 async def main():
   data = await collect()
@@ -265,11 +254,13 @@ async def main():
 
   print("Loaded {} events, processing them now".format(total))
 
-  print(data.head())
+  mint_map = {}
 
   for index, event in data.iterrows():
     if event["event_name"] == "Mint":
       handle_mint_event(event)
+    elif event["event_name"] == "Transfer":
+      handle_transfer_event(event)
     elif event["event_name"] == "Burn":
       handle_burn_event(event)
     elif event["event_name"] == "Swap":
@@ -287,6 +278,9 @@ async def main():
     # if (processed / pct5) >= 2:
     #   break
     #   # sys.exit(1)
+
+  print(lp_providers.get("0x58890A9cB27586E83Cb51d2d26bbE18a1a647245"))
+  print(lp_providers.get("0x58890A9cB27586E83Cb51d2d26bbE18a1a647245".lower()))
 
   print("-------------------")
   print("Done!")
