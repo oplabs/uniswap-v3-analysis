@@ -248,45 +248,65 @@ def find_tick_index(price):
 def get_sqrt_ratio_at_tick(tick_index):
   return math.sqrt(1.0001 ** tick_index) # * 2**96
 
-def get_liquidity_for_amount0(ratio_a, ratio_b, liquidity):
+def get_liquidity_for_amount0(ratio_a, ratio_b, amount0):
   if ratio_a > ratio_b: 
     (ratio_a, ratio_b) = (ratio_b, ratio_a)
-  
-  return math.floor(liquidity * (ratio_b - ratio_a) / ratio_b) / ratio_a
 
-def get_liquidity_for_amount1(ratio_a, ratio_b, liquidity):
+  return math.floor((amount0 * ratio_a * ratio_b) / (ratio_b - ratio_a))
+
+def get_liquidity_for_amount1(ratio_a, ratio_b, amount1):
   if ratio_a > ratio_b: 
     (ratio_a, ratio_b) = (ratio_b, ratio_a)
-  
+
+  return math.floor(amount1 / (ratio_b - ratio_a))
+
+def get_amount0_for_liquidity(ratio_a, ratio_b, liquidity):
+  if ratio_a > ratio_b: 
+    (ratio_a, ratio_b) = (ratio_b, ratio_a)
+
+  return math.floor(
+    liquidity * (ratio_b - ratio_a) / ratio_b / ratio_a
+  )
+
+def get_amount1_for_liquidity(ratio_a, ratio_b, liquidity):
+  if ratio_a > ratio_b: 
+    (ratio_a, ratio_b) = (ratio_b, ratio_a)
+
   return math.floor(liquidity * (ratio_b - ratio_a))
 
-def find_token_split(deposit_amount, lower_tick, upper_tick):
-  global latest_price
-  global latest_price_x96
-
-  sqrt_ratio_curr = latest_price_x96 / 2**96
-  sqrt_ratio_a = get_sqrt_ratio_at_tick(lower_tick)
-  sqrt_ratio_b = get_sqrt_ratio_at_tick(upper_tick)
-
+def get_liquidity_amounts(sqrt_ratio_curr, sqrt_ratio_a, sqrt_ratio_b, amount0, amount1):
   if sqrt_ratio_a > sqrt_ratio_b:
     (sqrt_ratio_a, sqrt_ratio_b) = (sqrt_ratio_b, sqrt_ratio_a)
 
   liquidity = 0
 
-  deposit_amount_adjusted = deposit_amount * 10**6
-
   if sqrt_ratio_curr <= sqrt_ratio_a:
-    liquidity = get_liquidity_for_amount0(sqrt_ratio_a, sqrt_ratio_b, deposit_amount_adjusted)
+    liquidity = get_liquidity_for_amount0(sqrt_ratio_a, sqrt_ratio_b, amount0)
   elif sqrt_ratio_curr < sqrt_ratio_b:
-    liquidity0 = get_liquidity_for_amount0(sqrt_ratio_curr, sqrt_ratio_b, deposit_amount_adjusted)
-    liquidity1 = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_curr, deposit_amount_adjusted)
+    liquidity0 = get_liquidity_for_amount0(sqrt_ratio_curr, sqrt_ratio_b, amount0)
+    liquidity1 = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_curr, amount1)
     liquidity = liquidity0 if liquidity0 < liquidity1 else liquidity1
   else:
-    liquidity = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_b, deposit_amount_adjusted)
+    liquidity = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_b, amount1)
+  
+  return liquidity
 
-  liquidity = math.floor(liquidity)
 
-  return (0, 0, liquidity)
+def find_token_split(deposit_amount, lower_tick, upper_tick):
+  global latest_price
+  global latest_price_x96
+
+  ratio_curr = latest_price_x96 / 2**96
+  ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+  ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+
+  deposit_amount_scaled = math.floor(10**6 * deposit_amount / 2)
+
+  liquidity = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, deposit_amount_scaled, deposit_amount_scaled)
+  usdc_amount = get_amount0_for_liquidity(ratio_a, ratio_b, liquidity)
+  usdt_amount = get_amount1_for_liquidity(ratio_a, ratio_b, liquidity)
+
+  return (usdc_amount, usdt_amount, liquidity)
 
 def print_profits(address):
   data = lp_providers.get(address.lower())
@@ -325,8 +345,8 @@ def handle_sims(block_number):
       (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount, lower_tick_index, upper_tick_index)
 
       print("Adding liquidity for simulated address {}:".format(address))
-      # print("\tUSDC       : {}".format(usdc_amount / 10**6))
-      # print("\tUSDT       : {}".format(usdt_amount / 10**6))
+      print("\tUSDC       : {}".format(usdc_amount / 10**6))
+      print("\tUSDT       : {}".format(usdt_amount / 10**6))
       print("\tLiquidity  : {}".format(liquidity))
       print("\tLower tick : {} ({})".format(lower_tick_index, lower_tick))
       print("\tUpper tick : {} ({})".format(upper_tick_index, upper_tick))
@@ -347,8 +367,8 @@ def handle_sims(block_number):
       (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount)
 
       print("Removing liquidity for simulated address {}:".format(address))
-      # print("\tUSDC       : {}".format(usdc_amount / 10**6))
-      # print("\tUSDT       : {}".format(usdt_amount / 10**6))
+      print("\tUSDC       : {}".format(usdc_amount / 10**6))
+      print("\tUSDT       : {}".format(usdt_amount / 10**6))
       print("\tLiquidity  : {}".format(liquidity))
       print("\tLower tick : {} ({})".format(lower_tick_index, lower_tick))
       print("\tUpper tick : {} ({})".format(upper_tick_index, upper_tick))
