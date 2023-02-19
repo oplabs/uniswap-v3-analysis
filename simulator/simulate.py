@@ -208,21 +208,11 @@ def find_token_split(max_usdc_amount, max_usdt_amount, lower_tick, upper_tick):
   (usdc_amount, usdt_amount) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
   return (usdc_amount, usdt_amount, liquidity)
 
-def print_profits(address):
-  data = lp_providers.get(address.lower())
-
-  print("Balances of {}:".format(address))
-  if data is None:
-    print("\tNOT FOUND")
-    return
-
-  print("\tNet Liquidity: {}".format(data["net_liquidity"]))
-  print("\tUSDC Fee: {}".format(data["usdc_profit"] / 10**6))
-  print("\tUSDT Fee: {}".format(data["usdt_profit"] / 10**6))
-
 deposited_sims = set()
 withdrawn_sims = set()
 rebalancer_map = {}
+sim_usdt_balances = {}
+sim_usdc_balances = {}
 data_service = SimulatorDataService()
 def handle_sims(block_number):
   global deposited_sims
@@ -240,7 +230,7 @@ def handle_sims(block_number):
 
   for sim in scenarios:
     address = sim["address"].lower()
-    token_id = "simtoken_" + address
+    token_id = address
 
     deposit_after = sim.get("deposit_after", 0)
     withdraw_before = sim.get("withdraw_before", 0)
@@ -273,6 +263,9 @@ def handle_sims(block_number):
 
       deposited_sims = deposited_sims | set([address])
 
+      sim_usdc_balances[address] = max_usdc_amount - usdc_amount
+      sim_usdt_balances[address] = max_usdt_amount - usdt_amount
+
       event = {
         "arg__tickLower": lower_tick_index,
         "arg__tickUpper": upper_tick_index,
@@ -289,35 +282,44 @@ def handle_sims(block_number):
       rebalancer_map[address] = rebalancer
 
     elif address not in withdrawn_sims and withdraw_before > 0 and withdraw_before >= block_number:
-      (usdc_amount, usdt_amount, liquidity) = find_token_split(max_usdc_amount, max_usdt_amount, lower_tick_index, upper_tick_index)
-
+      provider = lp_providers.get(address)
+      liquidity_to_remove = provider.get("net_liquidity")
+      (usdc_amount, usdt_amount) = decrease_liquidity(token_id, liquidity_to_remove)
       print("Removing liquidity for simulated address {}:".format(address))
       print("\tUSDC       : {}".format(usdc_amount / 10**6))
       print("\tUSDT       : {}".format(usdt_amount / 10**6))
-      print("\tLiquidity  : {}".format(liquidity))
+      print("\tLiquidity  : {}".format(liquidity_to_remove))
       print("\tLower tick : {} ({})".format(lower_tick_index, lower_tick))
       print("\tUpper tick : {} ({})".format(upper_tick_index, upper_tick))
 
       withdrawn_sims = withdrawn_sims | set([address])
 
       decrease_liquidity(token_id, liquidity)
+
+      sim_usdc_balances[address] += usdc_amount
+      sim_usdt_balances[address] += usdt_amount
+
     
 def handle_rebalances():
   rebalance_requests = data_service.get_rebalance_requests()
   for req in rebalance_requests:
-    (token_id, lower_tick, upper_tick) = req
-    address = token_id
+    (address, lower_tick, upper_tick) = req
+    address = address
+    token_id = address
     provider = lp_providers.get(address)
     if provider is not None:
       liquidity_to_remove = provider.get("net_liquidity")
-      (usdc, usdt) = decrease_liquidity(token_id, liquidity_to_remove)
+      (usdc_received, usdt_received) = decrease_liquidity(token_id, liquidity_to_remove)
       
-      usdc = usdc * (1 - pool_fee) - (usd_gas_estimate * 10**6)
-      usdt = usdt * (1 - pool_fee) - (usd_gas_estimate * 10**6)
+      sim_usdc_balances[address] += (usdc_received * (1 - pool_fee) - (usd_gas_estimate * 10**6))
+      sim_usdt_balances[address] += (usdt_received * (1 - pool_fee) - (usd_gas_estimate * 10**6))
 
-      if usdc < 0 or usdt < 0:
+      max_usdc = sim_usdc_balances[address]
+      max_usdt = sim_usdt_balances[address]
+
+      if max_usdc < 0 or max_usdt < 0:
         # Lost all capital??
-        data_service.pause_position(position_id)
+        data_service.pause_position(token_id)
         continue
       else:
         event = {
@@ -330,8 +332,45 @@ def handle_rebalances():
         ratio_a = get_sqrt_ratio_at_tick(lower_tick)
         ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-        liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, usdc, usdt)
-        increase_liquidity(token_id, liquidity_to_add)
+        liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
+
+        (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
+        sim_usdc_balances[address] -= usdc_added
+        sim_usdt_balances[address] -= usdt_added
+
+def print_profits(address):
+  data = lp_providers.get(address.lower())
+
+  print("Balances of {}:".format(address))
+  if data is None:
+    print("\tNOT FOUND")
+    return
+
+  usdc_fee = data["usdc_profit"]
+  usdt_fee = data["usdt_profit"]
+  usdc_bal = sim_usdc_balances[address]
+  usdt_bal = sim_usdt_balances[address]
+  liquidity = data["net_liquidity"]
+
+  event = token_id_mint_map[address]
+  lower_tick = event["arg__tickLower"]
+  upper_tick = event["arg__tickUpper"]
+  ratio_curr = (latest_price_x96 / 2**96) if latest_price_x96 is not None else get_sqrt_ratio_at_tick(0)
+  ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+  ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+  (usdc_for_liquidity, usdt_for_liquidity) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity_change)
+
+  print("\tNet Liquidity: {}".format(liquidity))
+
+  print("\tNet USDC: {}".format(usdc_for_liquidity + usdc_fee + usdc_bal / 10**6))
+  print("\t\tLiquidity: {}".format(usdc_for_liquidity / 10**6))
+  print("\t\tBal: {}".format(usdc_bal / 10**6))
+  print("\t\tFee: {}".format(usdc_fee / 10**6))
+
+  print("\tNet USDT: {}".format(usdt_for_liquidity + usdt_fee + usdt_bal / 10**6))
+  print("\t\tLiquidity: {}".format(usdt_for_liquidity / 10**6))
+  print("\t\tBal: {}".format(usdt_bal / 10**6))
+  print("\t\tFee: {}".format(usdt_fee / 10**6))
 
 async def simulate(start_block, end_block):
   print("Found {} scenarios to simulate".format(len(scenarios)))

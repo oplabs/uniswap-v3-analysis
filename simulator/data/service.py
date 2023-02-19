@@ -28,7 +28,7 @@ class SimulatorDataService:
     return False
 
   def pause_position(self, position_id):
-    print("Position {} is paused", position_id)
+    print("Position {} is paused".format(position_id))
     self._paused_positions = self._paused_positions | set([position_id])
 
   def is_position_paused(self, position_id):

@@ -35,14 +35,14 @@ class Rebalancer:
 
     if is_active:
       # Tick is currently active
-      if not was_active:
-        print("Position {} is active again".format(self.position_id))
+      # if not was_active:
+      #   print("Position {} is active again".format(self.position_id))
       self.out_of_bounds_since = None # Reset pointer
     else: 
       # Tick is inactive
       if was_active:
         # If yes, Note down the current block number
-        print("Position {} is inactive now".format(self.position_id))
+        # print("Position {} is inactive now".format(self.position_id))
         self.out_of_bounds_since = latest_block
       
       inactive_for = latest_block - (self.out_of_bounds_since or 0)
