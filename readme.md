@@ -4,10 +4,10 @@ pip3 install ctc && ctc config
 ```
 
 ## Simulation
-Update input file `input.csv` and then run:
+Update `simulator/data/scenarios.py` and then run:
 
 ```
-python3 simulate.py
+python3 run.py
 ```
 
 ## Plan
