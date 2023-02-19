@@ -34,7 +34,7 @@ def update_liquidity(token_id, liquidity_change, direction=1):
 
   if event is None or provider is None:
     # Unknown event?
-    return
+    return (0, 0)
 
   lower_tick = int(event["arg__tickLower"])
   upper_tick = int(event["arg__tickUpper"])
