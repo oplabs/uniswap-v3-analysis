@@ -311,11 +311,30 @@ def handle_rebalances():
       liquidity_to_remove = provider.get("net_liquidity")
       (usdc_received, usdt_received) = decrease_liquidity(token_id, liquidity_to_remove)
       
-      sim_usdc_balances[address] += (usdc_received * (1 - pool_fee) - (usd_gas_estimate * 10**6))
-      sim_usdt_balances[address] += (usdt_received * (1 - pool_fee) - (usd_gas_estimate * 10**6))
+      max_usdc = sim_usdc_balances[address] + (usdc_received * (1 - pool_fee))
+      max_usdt = sim_usdt_balances[address] + (usdt_received * (1 - pool_fee))
+      net_gas_estimate = usd_gas_estimate * 10**6
 
-      max_usdc = sim_usdc_balances[address]
-      max_usdt = sim_usdt_balances[address]
+      if (max_usdc + max_usdt) < gas_estimate:
+        # Lost all capital??
+        sim_usdc_balances[address] = max_usdc
+        sim_usdt_balances[address] = max_usdt
+        data_service.pause_position(token_id)
+        continue
+      elif (max_usdc >= net_gas_estimate / 2) and (max_usdt >= net_gas_estimate / 2):
+        max_usdc -= (net_gas_estimate / 2)
+        max_usdt -= (net_gas_estimate / 2)
+      elif max_usdc >= net_gas_estimate:
+        max_usdc -= net_gas_estimate
+      elif max_usdt >= net_gas_estimate:
+        max_usdt -= net_gas_estimate
+      else:
+        new_bal = max_usdc + max_usdt - net_gas_estimate
+        max_usdc = new_bal if max_usdc > max_usdt else 0
+        max_usdt = new_bal if max_usdc <= max_usdt else 0
+
+      sim_usdc_balances[address] = max_usdc
+      sim_usdt_balances[address] = max_usdt
 
       if max_usdc < 0 or max_usdt < 0:
         # Lost all capital??
@@ -363,9 +382,16 @@ def print_profits(address, initial_usdc, initial_usdt):
   net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
   net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
 
-  print("\tInitial Deposit Value: {}".format((initial_usdc + initial_usdt) / 10**6))
-  print("\tCurrent Deposit Value: {}".format((net_usdc + net_usdt) / 10**6))
-  print("\tDiff in Deposit Value: {}".format((net_usdc + net_usdt - initial_usdc - initial_usdt) / 10**6))
+  initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
+  current_value = math.floor((net_usdc + net_usdt) / 10**6)
+  diff = current_value - initial_deposit
+
+  growth = math.floor(10000 * diff / initial_deposit) / 100
+
+  print("\tGrowth: {}".format(growth))
+  print("\tInitial Deposit Value: {}".format(initial_deposit))
+  print("\tCurrent Deposit Value: {}".format(current_value))
+  print("\tDiff in Deposit Value: {}".format(diff))
   print("\tNet Liquidity: {}".format(liquidity))
   print("\tNet USDC: {}".format(net_usdc / 10**6))
   print("\t\tLiquidity: {}".format(usdc_for_liquidity / 10**6))
