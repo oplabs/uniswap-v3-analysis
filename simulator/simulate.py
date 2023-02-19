@@ -315,7 +315,7 @@ def handle_rebalances():
       max_usdt = sim_usdt_balances[address] + (usdt_received * (1 - pool_fee))
       net_gas_estimate = usd_gas_estimate * 10**6
 
-      if (max_usdc + max_usdt) < gas_estimate:
+      if (max_usdc + max_usdt) < net_gas_estimate:
         # Lost all capital??
         sim_usdc_balances[address] = max_usdc
         sim_usdt_balances[address] = max_usdt
