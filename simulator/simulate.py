@@ -336,26 +336,21 @@ def handle_rebalances():
       sim_usdc_balances[address] = max_usdc
       sim_usdt_balances[address] = max_usdt
 
-      if max_usdc < 0 or max_usdt < 0:
-        # Lost all capital??
-        data_service.pause_position(token_id)
-        continue
-      else:
-        event = {
-          "arg__tickLower": lower_tick,
-          "arg__tickUpper": upper_tick,
-        }
-        token_id_mint_map[token_id] = event
+      event = {
+        "arg__tickLower": lower_tick,
+        "arg__tickUpper": upper_tick,
+      }
+      token_id_mint_map[token_id] = event
 
-        ratio_curr = latest_price_x96 / 2**96
-        ratio_a = get_sqrt_ratio_at_tick(lower_tick)
-        ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+      ratio_curr = latest_price_x96 / 2**96
+      ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+      ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-        liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
+      liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
 
-        (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
-        sim_usdc_balances[address] -= usdc_added
-        sim_usdt_balances[address] -= usdt_added
+      (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
+      sim_usdc_balances[address] -= usdc_added
+      sim_usdt_balances[address] -= usdt_added
 
 def print_profits(address, initial_usdc, initial_usdt):
   data = lp_providers.get(address.lower())
