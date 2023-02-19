@@ -203,7 +203,7 @@ def find_token_split(max_usdc_amount, max_usdt_amount, lower_tick, upper_tick):
   ratio_a = get_sqrt_ratio_at_tick(lower_tick)
   ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-  liquidity = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc_amount * 10**6, max_usdt_amount * 10**6)
+  liquidity = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc_amount, max_usdt_amount)
 
   (usdc_amount, usdt_amount) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
   return (usdc_amount, usdt_amount, liquidity)
@@ -239,8 +239,8 @@ def handle_sims(block_number):
     rebalance_frequency = sim.get("rebalance_frequency", 0)
     target_tick_range = sim.get("target_tick_range", 1)
 
-    max_usdc_amount = sim["usdc_amount"]
-    max_usdt_amount = sim["usdt_amount"]
+    max_usdc_amount = math.floor(sim["usdc_amount"] * 10**6)
+    max_usdt_amount = math.floor(sim["usdt_amount"] * 10**6)
 
     lower_tick = sim["lower_tick"]
     upper_tick = sim["upper_tick"]
@@ -338,10 +338,10 @@ def handle_rebalances():
         sim_usdc_balances[address] -= usdc_added
         sim_usdt_balances[address] -= usdt_added
 
-def print_profits(address):
+def print_profits(address, initial_usdc, initial_usdt):
   data = lp_providers.get(address.lower())
 
-  print("Balances of {}:".format(address))
+  print("\n\nBalances of {}:".format(address))
   if data is None:
     print("\tNOT FOUND")
     return
@@ -358,16 +358,21 @@ def print_profits(address):
   ratio_curr = (latest_price_x96 / 2**96) if latest_price_x96 is not None else get_sqrt_ratio_at_tick(0)
   ratio_a = get_sqrt_ratio_at_tick(lower_tick)
   ratio_b = get_sqrt_ratio_at_tick(upper_tick)
-  (usdc_for_liquidity, usdt_for_liquidity) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity_change)
+  (usdc_for_liquidity, usdt_for_liquidity) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
 
+  net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
+  net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
+
+  print("\tInitial Deposit Value: {}".format((initial_usdc + initial_usdt) / 10**6))
+  print("\tCurrent Deposit Value: {}".format((net_usdc + net_usdt) / 10**6))
+  print("\tDiff in Deposit Value: {}".format((net_usdc + net_usdt - initial_usdc - initial_usdt) / 10**6))
   print("\tNet Liquidity: {}".format(liquidity))
-
-  print("\tNet USDC: {}".format(usdc_for_liquidity + usdc_fee + usdc_bal / 10**6))
+  print("\tNet USDC: {}".format(net_usdc / 10**6))
   print("\t\tLiquidity: {}".format(usdc_for_liquidity / 10**6))
   print("\t\tBal: {}".format(usdc_bal / 10**6))
   print("\t\tFee: {}".format(usdc_fee / 10**6))
 
-  print("\tNet USDT: {}".format(usdt_for_liquidity + usdt_fee + usdt_bal / 10**6))
+  print("\tNet USDT: {}".format((usdt_for_liquidity + usdt_fee + usdt_bal) / 10**6))
   print("\t\tLiquidity: {}".format(usdt_for_liquidity / 10**6))
   print("\t\tBal: {}".format(usdt_bal / 10**6))
   print("\t\tFee: {}".format(usdt_fee / 10**6))
@@ -409,6 +414,6 @@ async def simulate(start_block, end_block):
       # break
 
   for sim in scenarios:
-    print_profits(sim["address"])
+    print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6)
 
   print("Done!")
