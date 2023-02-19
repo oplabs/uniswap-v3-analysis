@@ -1,23 +1,10 @@
-import asyncio
-
-import ctc
-from ctc import evm
-from ctc.protocols import uniswap_v3_utils
-
-import pandas as pd
 import math
-import sys
-from pathlib import Path
-from input import simulations
+from utils.const import pool_fee, usd_gas_estimate
 
-usdc = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
-usdt = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-
-pool = "0x3416cf6c708da44db2624d63ea0aaef7113527c6" # USDT-USDC V3
-
-nftManager = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88" # NonFungiblePositionsManager
-
-cacheFilePath = "./chaindata.csv"
+from .data import collect, scenarios, SimulatorDataService
+from rebalancer import Rebalancer
+from utils.tick import find_tick_index, get_sqrt_ratio_at_tick
+from utils.liquidity import get_liquidity_amounts, get_amounts_for_liquidity
 
 ticks = {}
 lp_providers = {}
@@ -27,8 +14,6 @@ latest_price = None
 latest_price_x96 = None
 net_liquidity = 0
 
-fee = 0.0001 #0.01%
-
 net_usdc_fee = 0
 net_usdt_fee = 0
 
@@ -36,72 +21,13 @@ mint_ev_map = {}
 token_id_owner_map = {}
 token_id_mint_map = {}
 
-start_block = "13609065"
-end_block = "16642500"
-
-# start_block = "16539882"
-# end_block = "16539884"
-
-async def collect():
-  global start_block
-  global end_block
-
-  print("Reading data from blockchain...")
-
-  swaps, mints, increases, decreases, transfers = await asyncio.gather(  
-    ctc.async_get_events(
-      pool,
-      event_name='Swap',
-      start_block=start_block,
-      end_block=end_block,
-    ),
-    ctc.async_get_events(
-      pool,
-      event_name='Mint',
-      start_block=start_block,
-      end_block=end_block,
-    ),
-    ctc.async_get_events(
-      nftManager,
-      event_name='IncreaseLiquidity',
-      start_block=start_block,
-      end_block=end_block,
-    ),
-    ctc.async_get_events(
-      nftManager,
-      event_name='DecreaseLiquidity',
-      start_block=start_block,
-      end_block=end_block,
-    ),
-    ctc.async_get_events(
-      nftManager,
-      event_name='Transfer',
-      start_block=start_block,
-      end_block=end_block,
-    ),
-  )
-
-  swaps = pd.DataFrame(swaps.to_records())
-  mints = pd.DataFrame(mints.to_records())
-  increases = pd.DataFrame(increases.to_records())
-  decreases = pd.DataFrame(decreases.to_records())
-  transfers = pd.DataFrame(transfers.to_records())
-  transfers = transfers[transfers["arg__from"] == "0x0000000000000000000000000000000000000000"]
-
-  return pd.concat(
-    [swaps, mints, increases, decreases, transfers]
-  ).sort_values(
-    by=['block_number', 'transaction_index', 'log_index'],
-    ascending=True,
-    ignore_index=True,
-  )
-
 def handle_mint_event(event):
   key = event["block_hash"] + "_" + event["transaction_hash"]
   mint_ev_map[key] = event
 
 def update_liquidity(token_id, liquidity_change, direction=1):
   global net_liquidity
+  global latest_price_x96
 
   event = token_id_mint_map.get(token_id)
   provider = str(token_id_owner_map.get(token_id)).lower()
@@ -112,42 +38,65 @@ def update_liquidity(token_id, liquidity_change, direction=1):
 
   lower_tick = int(event["arg__tickLower"])
   upper_tick = int(event["arg__tickUpper"])
-
+  
   total_ticks = upper_tick - lower_tick + 1
+
+  ratio_curr = (latest_price_x96 / 2**96) if latest_price_x96 is not None else get_sqrt_ratio_at_tick(0)
+  ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+  ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+  (usdc_for_liquidity, usdt_for_liquidity) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity_change)
+
   liquidity_per_tick = liquidity_change / total_ticks
+  # usdc_per_tick = usdc_for_liquidity / total_ticks
+  # usdt_per_tick = usdt_for_liquidity / total_ticks
 
   net_liquidity += (liquidity_change * direction)
 
   lp_provider = lp_providers.get(provider, {
     "net_liquidity": 0,
+    # "usdc_net": 0,
+    # "usdt_net": 0,
     "usdc_profit": 0,
     "usdt_profit": 0
   })
   lp_provider["net_liquidity"] += (liquidity_change * direction)
+  # lp_provider["usdc_net"] += (usdc_for_liquidity * direction)
+  # lp_provider["usdt_net"] += (usdt_for_liquidity * direction)
   lp_providers[provider] = lp_provider
 
   for i in range(total_ticks+1):
     key = str(lower_tick + i)
     tick = ticks.get(key, {
       'liquidity': 0,
+      # 'usdc': 0,
+      # 'usdt': 0,
       'positions': {}
     })
 
     pos = tick['positions'].get(provider, {
-      'liquidity': 0
+      'liquidity': 0,
+      # 'usdt': 0,
+      # 'usdc': 0
     })
     pos['liquidity'] += (liquidity_per_tick * direction)
+    # pos['usdc'] += (usdc_per_tick * direction)
+    # pos['usdt'] += (usdt_per_tick * direction)
+
     tick['positions'][provider] = pos
 
     tick['liquidity'] += (liquidity_per_tick * direction)
+    # tick['usdc'] += (usdc_per_tick * direction)
+    # tick['usdc'] += (usdt_per_tick * direction)
 
     ticks[key] = tick
 
+  return (usdc_for_liquidity, usdt_for_liquidity)
+
 def increase_liquidity(token_id, liquidity_added):
-  update_liquidity(token_id, liquidity_added, 1)
+  return update_liquidity(token_id, liquidity_added, 1)
 
 def decrease_liquidity(token_id, liquidity_removed):
-  update_liquidity(token_id, liquidity_removed, -1)
+  return update_liquidity(token_id, liquidity_removed, -1)
 
 def handle_transfer_event(transfer_event):
   block_hash = transfer_event["block_hash"]
@@ -173,6 +122,8 @@ def handle_burn_event(event):
 def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
   tick = ticks.get(str(tick_index), {
     'liquidity': 0,
+    # 'usdc': 0,
+    # 'usdt': 0,
     'positions': {}
   })
 
@@ -181,6 +132,8 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
     for addr in tick['positions'].keys():
       lp_provider = lp_providers.get(addr, {
         "net_liquidity": 0,
+        # "usdc_net": 0,
+        # "usdt_net": 0,
         "usdc_profit": 0,
         "usdt_profit": 0
       })
@@ -209,8 +162,8 @@ def handle_swap_event(event):
   first_swap = last_tick is None 
   is_multi_tick = last_tick != curr_tick and not first_swap
 
-  usdc_fee = abs(amount0) * fee
-  usdt_fee = abs(amount1) * fee
+  usdc_fee = abs(amount0) * pool_fee
+  usdt_fee = abs(amount1) * pool_fee
   
   net_usdc_fee += usdc_fee
   net_usdt_fee += usdt_fee
@@ -242,57 +195,7 @@ def handle_decrease_event(event):
   liquidity_removed = int(event['arg__liquidity'])
   decrease_liquidity(token_id, liquidity_removed)
 
-def find_tick_index(price):
-  return round(math.log(price, 1.0001))
-
-def get_sqrt_ratio_at_tick(tick_index):
-  return math.sqrt(1.0001 ** tick_index) # * 2**96
-
-def get_liquidity_for_amount0(ratio_a, ratio_b, amount0):
-  if ratio_a > ratio_b: 
-    (ratio_a, ratio_b) = (ratio_b, ratio_a)
-
-  return math.floor((amount0 * ratio_a * ratio_b) / (ratio_b - ratio_a))
-
-def get_liquidity_for_amount1(ratio_a, ratio_b, amount1):
-  if ratio_a > ratio_b: 
-    (ratio_a, ratio_b) = (ratio_b, ratio_a)
-
-  return math.floor(amount1 / (ratio_b - ratio_a))
-
-def get_amount0_for_liquidity(ratio_a, ratio_b, liquidity):
-  if ratio_a > ratio_b: 
-    (ratio_a, ratio_b) = (ratio_b, ratio_a)
-
-  return math.floor(
-    liquidity * (ratio_b - ratio_a) / ratio_b / ratio_a
-  )
-
-def get_amount1_for_liquidity(ratio_a, ratio_b, liquidity):
-  if ratio_a > ratio_b: 
-    (ratio_a, ratio_b) = (ratio_b, ratio_a)
-
-  return math.floor(liquidity * (ratio_b - ratio_a))
-
-def get_liquidity_amounts(sqrt_ratio_curr, sqrt_ratio_a, sqrt_ratio_b, amount0, amount1):
-  if sqrt_ratio_a > sqrt_ratio_b:
-    (sqrt_ratio_a, sqrt_ratio_b) = (sqrt_ratio_b, sqrt_ratio_a)
-
-  liquidity = 0
-
-  if sqrt_ratio_curr <= sqrt_ratio_a:
-    liquidity = get_liquidity_for_amount0(sqrt_ratio_a, sqrt_ratio_b, amount0)
-  elif sqrt_ratio_curr < sqrt_ratio_b:
-    liquidity0 = get_liquidity_for_amount0(sqrt_ratio_curr, sqrt_ratio_b, amount0)
-    liquidity1 = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_curr, amount1)
-    liquidity = liquidity0 if liquidity0 < liquidity1 else liquidity1
-  else:
-    liquidity = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_b, amount1)
-  
-  return liquidity
-
-
-def find_token_split(deposit_amount, lower_tick, upper_tick):
+def find_token_split(max_usdc_amount, max_usdt_amount, lower_tick, upper_tick):
   global latest_price
   global latest_price_x96
 
@@ -300,12 +203,9 @@ def find_token_split(deposit_amount, lower_tick, upper_tick):
   ratio_a = get_sqrt_ratio_at_tick(lower_tick)
   ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-  deposit_amount_scaled = math.floor(10**6 * deposit_amount / 2)
+  liquidity = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc_amount * 10**6, max_usdt_amount * 10**6)
 
-  liquidity = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, deposit_amount_scaled, deposit_amount_scaled)
-  usdc_amount = get_amount0_for_liquidity(ratio_a, ratio_b, liquidity)
-  usdt_amount = get_amount1_for_liquidity(ratio_a, ratio_b, liquidity)
-
+  (usdc_amount, usdt_amount) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
   return (usdc_amount, usdt_amount, liquidity)
 
 def print_profits(address):
@@ -322,27 +222,47 @@ def print_profits(address):
 
 deposited_sims = set()
 withdrawn_sims = set()
+rebalancer_map = {}
+data_service = SimulatorDataService()
 def handle_sims(block_number):
   global deposited_sims
   global withdrawn_sims
   global latest_price
+  global last_tick
 
   if latest_price is None:
     return
 
-  for sim in simulations:
+  data_service.set_latest_block(block_number)
+  data_service.set_latest_tick(last_tick)
+
+  handle_rebalances()
+
+  for sim in scenarios:
     address = sim["address"].lower()
     token_id = "simtoken_" + address
-    deposit_after = sim["deposit_after"]
-    withdraw_before = sim["withdraw_before"]
-    deposit_amount = sim["deposit_amount"]
+
+    deposit_after = sim.get("deposit_after", 0)
+    withdraw_before = sim.get("withdraw_before", 0)
+
+    enable_rebalancer = sim.get("enable_rebalancer", False)
+    rebalance_frequency = sim.get("rebalance_frequency", 0)
+    target_tick_range = sim.get("target_tick_range", 1)
+
+    max_usdc_amount = sim["usdc_amount"]
+    max_usdt_amount = sim["usdt_amount"]
+
     lower_tick = sim["lower_tick"]
     upper_tick = sim["upper_tick"]
     lower_tick_index = find_tick_index(lower_tick)
     upper_tick_index = find_tick_index(upper_tick)
 
-    if address not in deposited_sims and (deposit_after == 0 or deposit_after >= block_number):
-      (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount, lower_tick_index, upper_tick_index)
+    if enable_rebalancer and address in deposited_sims and address not in withdrawn_sims:
+      rebalancer = rebalancer_map[address]
+      rebalancer.run()
+
+    if address not in deposited_sims and (deposit_after == 0 or deposit_after <= block_number):
+      (usdc_amount, usdt_amount, liquidity) = find_token_split(max_usdc_amount, max_usdt_amount, lower_tick_index, upper_tick_index)
 
       print("Adding liquidity for simulated address {}:".format(address))
       print("\tUSDC       : {}".format(usdc_amount / 10**6))
@@ -363,8 +283,13 @@ def handle_sims(block_number):
 
       increase_liquidity(token_id, liquidity)
 
-    elif address not in withdrawn_sims and withdraw_before > 0 and withdraw_before <= block_number:
-      (usdc_amount, usdt_amount, liquidity) = find_token_split(deposit_amount)
+      data_service.set_position_data(address, (lower_tick_index, upper_tick_index))
+
+      rebalancer = Rebalancer(data_service, address, target_tick_range, rebalance_frequency)
+      rebalancer_map[address] = rebalancer
+
+    elif address not in withdrawn_sims and withdraw_before > 0 and withdraw_before >= block_number:
+      (usdc_amount, usdt_amount, liquidity) = find_token_split(max_usdc_amount, max_usdt_amount, lower_tick_index, upper_tick_index)
 
       print("Removing liquidity for simulated address {}:".format(address))
       print("\tUSDC       : {}".format(usdc_amount / 10**6))
@@ -376,20 +301,42 @@ def handle_sims(block_number):
       withdrawn_sims = withdrawn_sims | set([address])
 
       decrease_liquidity(token_id, liquidity)
+    
+def handle_rebalances():
+  rebalance_requests = data_service.get_rebalance_requests()
+  for req in rebalance_requests:
+    (token_id, lower_tick, upper_tick) = req
+    address = token_id
+    provider = lp_providers.get(address)
+    if provider is not None:
+      liquidity_to_remove = provider.get("net_liquidity")
+      (usdc, usdt) = decrease_liquidity(token_id, liquidity_to_remove)
       
+      usdc = usdc * (1 - pool_fee) - (usd_gas_estimate * 10**6)
+      usdt = usdt * (1 - pool_fee) - (usd_gas_estimate * 10**6)
 
-async def main():
-  print("Found {} scenarios to simulate".format(len(simulations)))
+      if usdc < 0 or usdt < 0:
+        # Lost all capital??
+        data_service.pause_position(position_id)
+        continue
+      else:
+        event = {
+          "arg__tickLower": lower_tick,
+          "arg__tickUpper": upper_tick,
+        }
+        token_id_mint_map[token_id] = event
 
-  cached_data = Path(cacheFilePath).exists()
+        ratio_curr = latest_price_x96 / 2**96
+        ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+        ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-  if cached_data: print("Reading blockchain data from cache...")
-  data = pd.read_csv(cacheFilePath) if cached_data else (await collect())
+        liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, usdc, usdt)
+        increase_liquidity(token_id, liquidity_to_add)
 
-  if not cached_data:
-    print("Caching loaded data...")
-    data.to_csv(cacheFilePath)
+async def simulate(start_block, end_block):
+  print("Found {} scenarios to simulate".format(len(scenarios)))
 
+  data = await collect(start_block, end_block)
 
   total = len(data)
   processed = 0
@@ -398,7 +345,7 @@ async def main():
   print("Loaded {} events, processing them now".format(total))
 
   for index, event in data.iterrows():
-    block_number = event["block_number"]
+    block_number = int(event["block_number"])
     event_name = event["event_name"]
     
     handle_sims(block_number)
@@ -422,9 +369,7 @@ async def main():
       print("Processed {} events".format(str(math.floor(5 * processed / pct5)) + "%"))
       # break
 
-  for sim in simulations:
+  for sim in scenarios:
     print_profits(sim["address"])
 
   print("Done!")
-
-asyncio.run(main())
