@@ -1,4 +1,4 @@
-enable_rebalancer = True
+enable_rebalancer = False
 deposit_liquidities = [
   # (50000, 50000),
   (500000, 500000),
@@ -14,27 +14,40 @@ tick_ranges = [
 ]
 rebase_frequencies = [
   0,
-  # 10,
-  # 100,
+  10,
+  100,
 ]
 
 scenarios = []
 
 for (usdc_amount, usdt_amount) in deposit_liquidities:
   for tick_range in tick_ranges:
-    for frequency in rebase_frequencies:
+    if enable_rebalancer == True:
+      for frequency in rebase_frequencies:
+        scenarios.append({
+          "address": "0xsim_{}_{}_{}_{}".format(tick_range, frequency, usdc_amount, usdt_amount),
+          "usdc_amount": usdc_amount,
+          "usdt_amount": usdt_amount,
+          "deposit_after": 14236000,
+          "withdraw_before": 0,
+          "lower_tick": 1 - (tick_range * 0.0001),
+          "upper_tick": 1 + (tick_range * 0.0001),
+          "enable_rebalancer": enable_rebalancer,
+          "rebalance_frequency": frequency,
+          "target_tick_range": tick_range
+        })
+    else:
       scenarios.append({
-        "address": "0xsim_{}_{}_{}_{}".format(tick_range, frequency, usdc_amount, usdt_amount),
+        "address": "0xsim_{}_{}_{}".format(tick_range, usdc_amount, usdt_amount),
         "usdc_amount": usdc_amount,
         "usdt_amount": usdt_amount,
         "deposit_after": 14236000,
         "withdraw_before": 0,
         "lower_tick": 1 - (tick_range * 0.0001),
         "upper_tick": 1 + (tick_range * 0.0001),
-        "enable_rebalancer": enable_rebalancer,
-        "rebalance_frequency": frequency,
-        "target_tick_range": tick_range
+        "enable_rebalancer": False
       })
+
 
 # scenarios = [
 #   # Rebalance Frequency: 0, 
