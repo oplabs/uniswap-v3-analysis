@@ -6,9 +6,9 @@ deposit_liquidities = [
 ]
 tick_ranges = [1, 2, 4, 8, 10, 100]
 rebase_frequencies = [
-  # 0,
+  0,
   # 10,
-  100,
+  # 100,
 ]
 
 scenarios = []

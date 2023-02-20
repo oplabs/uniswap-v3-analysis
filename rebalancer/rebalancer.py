@@ -47,7 +47,7 @@ class Rebalancer:
       
       inactive_for = latest_block - (self.out_of_bounds_since or 0)
 
-      if inactive_for >= self.rebalance_frequency:
+      if self.rebalance_frequency == 0 or inactive_for >= self.rebalance_frequency:
         # Rebalance when needed
         self.rebalance()
     
