@@ -299,7 +299,7 @@ def handle_sims(block_number):
       sim_usdc_balances[address] += usdc_amount
       sim_usdt_balances[address] += usdt_amount
 
-    
+rebalance_counter = {}
 def handle_rebalances():
   rebalance_requests = data_service.get_rebalance_requests()
   for req in rebalance_requests:
@@ -353,6 +353,7 @@ def handle_rebalances():
       sim_usdt_balances[address] -= usdt_added
 
       data_service.set_position_data(address, (lower_tick, upper_tick))
+      rebalance_counter[address] = (rebalance_counter.get(address, 0)) + 1
 
 def print_profits(address, initial_usdc, initial_usdt):
   data = lp_providers.get(address.lower())
@@ -378,6 +379,7 @@ def print_profits(address, initial_usdc, initial_usdt):
 
   net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
   net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
+  net_fee = usdc_fee + usdt_fee
 
   initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
   current_value = math.floor((net_usdc + net_usdt) / 10**6)
@@ -390,6 +392,8 @@ def print_profits(address, initial_usdc, initial_usdt):
   print("\tCurrent Deposit Value: {}".format(current_value))
   print("\tDiff in Deposit Value: {}".format(diff))
   print("\tNet Liquidity: {}".format(liquidity))
+  print("\tTotal Rebalances: {}".format(rebalance_counter.get(address, 0)))
+  print("\tNet Fee Earned: {}".format(net_fee / 10**6))
   print("\tNet USDC: {}".format(net_usdc / 10**6))
   print("\t\tLiquidity: {}".format(usdc_for_liquidity / 10**6))
   print("\t\tBal: {}".format(usdc_bal / 10**6))
