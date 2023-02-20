@@ -9,7 +9,7 @@ class SimulatorDataService:
 
   def request_rebalance(self, position_id, desired_lower_tick, desired_upper_tick):
     self._scheduled_rebalances.append(
-      set([position_id, desired_lower_tick, desired_upper_tick])
+      [position_id, desired_lower_tick, desired_upper_tick]
     )
 
   def get_position_data(self, position_id):
@@ -22,7 +22,7 @@ class SimulatorDataService:
     return self._latest_tick
 
   def has_pending_rebalance(self, position_id):
-    for (position_id, lt, ut) in self._scheduled_rebalances:
+    for [position_id, lt, ut] in self._scheduled_rebalances:
       if position_id == position_id:
         return True
     return False

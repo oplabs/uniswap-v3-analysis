@@ -4,7 +4,14 @@ deposit_liquidities = [
   (500000, 500000),
   # (2500000, 2500000),
 ]
-tick_ranges = [1, 2, 4, 8, 10, 100]
+tick_ranges = [
+  1, 
+  2, 
+  4, 
+  8, 
+  10, 
+  100,
+]
 rebase_frequencies = [
   0,
   # 10,

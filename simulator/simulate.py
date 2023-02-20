@@ -302,58 +302,56 @@ def handle_sims(block_number):
 rebalance_counter = {}
 def handle_rebalances():
   rebalance_requests = data_service.get_rebalance_requests()
-  for req in rebalance_requests:
-    (address, lower_tick, upper_tick) = req
+  for [address, lower_tick, upper_tick] in rebalance_requests:
     address = address
     token_id = address
     provider = lp_providers.get(address)
-    if provider is not None:
-      liquidity_to_remove = provider.get("net_liquidity")
-      (usdc_received, usdt_received) = decrease_liquidity(token_id, liquidity_to_remove)
-      
-      max_usdc = sim_usdc_balances[address] + (usdc_received * (1 - pool_fee))
-      max_usdt = sim_usdt_balances[address] + (usdt_received * (1 - pool_fee))
-      net_gas_estimate = usd_gas_estimate * 10**6
+    liquidity_to_remove = provider.get("net_liquidity")
+    (usdc_received, usdt_received) = decrease_liquidity(token_id, liquidity_to_remove)
+    
+    max_usdc = sim_usdc_balances[address] + (usdc_received * (1 - pool_fee))
+    max_usdt = sim_usdt_balances[address] + (usdt_received * (1 - pool_fee))
+    net_gas_estimate = usd_gas_estimate * 10**6
 
-      if (max_usdc + max_usdt) < net_gas_estimate:
-        # Lost all capital??
-        sim_usdc_balances[address] = max_usdc
-        sim_usdt_balances[address] = max_usdt
-        data_service.pause_position(token_id)
-        continue
-      elif (max_usdc >= net_gas_estimate / 2) and (max_usdt >= net_gas_estimate / 2):
-        max_usdc -= (net_gas_estimate / 2)
-        max_usdt -= (net_gas_estimate / 2)
-      elif max_usdc >= net_gas_estimate:
-        max_usdc -= net_gas_estimate
-      elif max_usdt >= net_gas_estimate:
-        max_usdt -= net_gas_estimate
-      else:
-        new_bal = max_usdc + max_usdt - net_gas_estimate
-        max_usdc = new_bal if max_usdc > max_usdt else 0
-        max_usdt = new_bal if max_usdc <= max_usdt else 0
-
+    if (max_usdc + max_usdt) < net_gas_estimate:
+      # Lost all capital??
       sim_usdc_balances[address] = max_usdc
       sim_usdt_balances[address] = max_usdt
+      data_service.pause_position(token_id)
+      continue
+    elif (max_usdc >= net_gas_estimate / 2) and (max_usdt >= net_gas_estimate / 2):
+      max_usdc -= (net_gas_estimate / 2)
+      max_usdt -= (net_gas_estimate / 2)
+    elif max_usdc >= net_gas_estimate:
+      max_usdc -= net_gas_estimate
+    elif max_usdt >= net_gas_estimate:
+      max_usdt -= net_gas_estimate
+    else:
+      new_bal = max_usdc + max_usdt - net_gas_estimate
+      max_usdc = new_bal if max_usdc > max_usdt else 0
+      max_usdt = new_bal if max_usdc <= max_usdt else 0
 
-      event = {
-        "arg__tickLower": lower_tick,
-        "arg__tickUpper": upper_tick,
-      }
-      token_id_mint_map[token_id] = event
+    sim_usdc_balances[address] = max_usdc
+    sim_usdt_balances[address] = max_usdt
 
-      ratio_curr = latest_price_x96 / 2**96
-      ratio_a = get_sqrt_ratio_at_tick(lower_tick)
-      ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+    event = {
+      "arg__tickLower": lower_tick,
+      "arg__tickUpper": upper_tick,
+    }
+    token_id_mint_map[token_id] = event
 
-      liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
+    ratio_curr = latest_price_x96 / 2**96
+    ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+    ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-      (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
-      sim_usdc_balances[address] -= usdc_added
-      sim_usdt_balances[address] -= usdt_added
+    liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
 
-      data_service.set_position_data(address, (lower_tick, upper_tick))
-      rebalance_counter[address] = (rebalance_counter.get(address, 0)) + 1
+    (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
+    sim_usdc_balances[address] -= usdc_added
+    sim_usdt_balances[address] -= usdt_added
+
+    data_service.set_position_data(address, (lower_tick, upper_tick))
+    rebalance_counter[address] = (rebalance_counter.get(address, 0)) + 1
 
 def print_profits(address, initial_usdc, initial_usdt):
   data = lp_providers.get(address.lower())
@@ -438,7 +436,9 @@ async def simulate(start_block, end_block):
 
     if processed % pct5 == 0:
       print("Processed {} events".format(str(math.floor(5 * processed / pct5)) + "%"))
-      # break
+    
+    # if processed % (pct5*4) == 0:
+    #   break
 
   for sim in scenarios:
     print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6)
