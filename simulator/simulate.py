@@ -346,12 +346,13 @@ def handle_rebalances():
       ratio_a = get_sqrt_ratio_at_tick(lower_tick)
       ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-      data_service.set_position_data(address, (lower_tick, upper_tick))
       liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
 
       (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
       sim_usdc_balances[address] -= usdc_added
       sim_usdt_balances[address] -= usdt_added
+
+      data_service.set_position_data(address, (lower_tick, upper_tick))
 
 def print_profits(address, initial_usdc, initial_usdt):
   data = lp_providers.get(address.lower())
