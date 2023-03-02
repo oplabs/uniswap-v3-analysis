@@ -36,6 +36,7 @@ for (usdc_amount, usdt_amount) in deposit_liquidities:
           "rebalance_frequency": frequency,
           "target_tick_range": tick_range,
           # how much APY are non Uniswap deployed funds earning? (e.g. deployed in Aave)
+          # 1 -> 100%, 0.02 -> 2%
           "non_deployed_apy": 0.02,
         })
     else:

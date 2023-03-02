@@ -1,4 +1,5 @@
 import math
+from decimal import Decimal
 from utils.const import pool_fee, usd_gas_estimate
 
 from .data import collect, scenarios, SimulatorDataService
@@ -355,10 +356,26 @@ def handle_rebalances():
     data_service.set_position_data(address, (lower_tick, upper_tick))
     rebalance_counter[address] = (rebalance_counter.get(address, 0)) + 1
 
-def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy):
-  data = lp_providers.get(address.lower())
+# calculate how much strategy would earn if non active funds were deployed to Aave / Compound
+def calculate_aave_profits(non_deployed_apy, sim_balance_ranges_w_time, sim_address):
+  seconds_in_a_year = 86400 * 365.25
+  profits = 0
+  for token in ['USDT', 'USDC']:
+    balances_with_time = sim_balance_ranges_w_time[token][sim_address]
+    for balance_item in balances_with_time: 
+      if balance_item['block_range_time_diff'] == 'false':
+        continue
 
-  
+      profit = balance_item['balance'] * non_deployed_apy * balance_item['block_range_time_diff'] / seconds_in_a_year
+      profits += profit
+
+  return profits
+
+def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy, balance_changes_w_time, sim_balance_ranges_w_time):
+  data = lp_providers.get(address.lower())
+  # how long were the funds active in the Uniswap
+  simulation_active_time = sim_balance_ranges_w_time[address]['block_range_time_diff']
+  seconds_in_a_year = 86400 * 365.25
 
   print("\n\nBalances of {}:".format(address))
   if data is None:
@@ -370,6 +387,8 @@ def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy):
   usdc_bal = sim_usdc_balances[address]
   usdt_bal = sim_usdt_balances[address]
   liquidity = data["net_liquidity"]
+
+  aave_profits = calculate_aave_profits(non_deployed_apy, balance_changes_w_time, address) / 10**6
 
   event = token_id_mint_map[address]
   lower_tick = event["arg__tickLower"]
@@ -386,9 +405,19 @@ def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy):
   initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
   current_value = math.floor((net_usdc + net_usdt) / 10**6)
   diff = current_value - initial_deposit
+  def calculate_apr_from_profit(profit):
+    return (profit / initial_deposit) * seconds_in_a_year / simulation_active_time
+
+  apr = calculate_apr_from_profit(diff)
+  aave_apr = calculate_apr_from_profit(aave_profits)
+  total_apr = calculate_apr_from_profit(aave_profits + diff)
 
   growth = math.floor(10000 * diff / initial_deposit) / 100
 
+  #print("\tAPR: {}%".format(round(apr * 100, 2)))
+  print("\tAPY: {}%".format(round(to_apy(apr) * 100, 2)))
+  print("\tAave APY: {}%".format(round(to_apy(aave_apr) * 100, 2)))
+  print("\tTotal APY: {}%".format(round(to_apy(total_apr) * 100, 2)))
   print("\tGrowth: {}".format(growth))
   print("\tInitial Deposit Value: {}".format(initial_deposit))
   print("\tCurrent Deposit Value: {}".format(current_value))
@@ -405,10 +434,14 @@ def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy):
   print("\t\tLiquidity: {}".format(usdt_for_liquidity / 10**6))
   print("\t\tBal: {}".format(usdt_bal / 10**6))
   print("\t\tFee: {}".format(usdt_fee / 10**6))
+  print("\tDays active: {}".format(round(simulation_active_time / 86400, 2)))
+
 
 # these are used just to figure out possible balance changes `handle_sims` function
 # might have made
 sim_balances_temp = {}
+# first & last block of scenario with balance - for APR calculation
+sim_balance_ranges = {}
 balance_changes = {
   'USDT': {},
   'USDC': {}
@@ -422,7 +455,7 @@ def store_simulation_balances():
 
 # in case amount of usdt/usdc balance of simulation changes record it
 # use `forceRecord` to record the final block even when there are no changes
-async def record_token_balance_changes(block_number, forceRecord=False):
+def record_token_balance_changes(block_number, forceRecord=False):
   temp_tokens = [sim_balances_temp['USDT'], sim_balances_temp['USDC']]
   stored_tokens = [sim_usdt_balances, sim_usdc_balances]
 
@@ -435,10 +468,19 @@ async def record_token_balance_changes(block_number, forceRecord=False):
       if sim_address not in balance_changes[token]:
         balance_changes[token][sim_address] = []
 
+      if sim_address not in sim_balance_ranges:
+        sim_balance_ranges[sim_address] = {'first_block_number': False, 'last_block_number': False, 'block_range_time_diff': False}
+
       balance_change = balance_changes[token][sim_address]
 
       if sim_address not in sim_token_balance_temp:
         sim_token_balance_temp[sim_address] = 0
+
+      # update first block when simulation has balance record
+      if stored_token_dictionary[sim_address] > 0 and sim_balance_ranges[sim_address]['first_block_number'] == False:
+        sim_balance_ranges[sim_address]['first_block_number'] = block_number
+      # just update final / last block that simulation was active each time
+      sim_balance_ranges[sim_address]['last_block_number'] = block_number
 
       # simulation balance has not changed... continue
       if sim_token_balance_temp[sim_address] == stored_token_dictionary[sim_address] and not forceRecord:
@@ -452,17 +494,34 @@ async def record_token_balance_changes(block_number, forceRecord=False):
         'block_number_end': False, # until what block was this balance
         'block_range_time_diff': False # amount of seconds between block_number & block_number_end
       }
-      print("appending info", balance_change_info)
-      balance_changes.append(balance_change_info)
+
+      balance_change.append(balance_change_info)
 
       # not the first balance change
       if len(balance_change) > 1:
         previous_balance_change_info = balance_change[-2]
         previous_balance_change_info['block_number_end'] = block_number - 1
-        previous_balance_change_info['block_range_time_diff'] = await collect(previous_balance_change_info['block_number'], block_number - 1)
 
+async def add_block_range_times_to_balance_changes(balance_change, sim_balance_ranges):
+  for token in balance_changes:
+    for sim_address in balance_changes[token]:
+      changes_array = balance_changes[token][sim_address]
+      for index, change_item in enumerate(changes_array):
+        # skip first item
+        if index == 0:
+          continue
+        prev_change = balance_changes[token][sim_address][index - 1]
+        prev_change['block_range_time_diff'] = await getBlockTimeDiff(prev_change['block_number'], change_item['block_number'] - 1)
 
+  for sim_address in sim_balance_ranges:
+    sim_range = sim_balance_ranges[sim_address]
+    sim_range['block_range_time_diff'] = await getBlockTimeDiff(sim_range['first_block_number'], sim_range['last_block_number'])
 
+  return [balance_changes, sim_balance_ranges]
+
+def to_apy(apr, days=30.00):
+    periods_per_year = Decimal(365.25 / days)
+    return ((1 + Decimal(apr) / periods_per_year / 100) ** periods_per_year - 1) * 100
 
 async def simulate(start_block, end_block):
   print("Found {} scenarios to simulate".format(len(scenarios)))
@@ -502,13 +561,13 @@ async def simulate(start_block, end_block):
     if processed % pct5 == 0:
       print("Processed {} events".format(str(math.floor(5 * processed / pct5)) + "%"))
     
-    if processed % (pct5*4) == 0:
-      break
+    #if processed % (pct5*4) == 0:
+    #  break
 
   record_token_balance_changes(latest_block_number, True)
-  print("balance_changes", balance_changes)
+  balance_changes_w_time, sim_balance_ranges_w_time = await add_block_range_times_to_balance_changes(balance_changes, sim_balance_ranges)
 
   for sim in scenarios:
-    print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6, sim["non_deployed_apy"])
+    print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6, sim["non_deployed_apy"], balance_changes_w_time, sim_balance_ranges_w_time)
 
   print("Done!")
