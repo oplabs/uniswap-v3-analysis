@@ -1,6 +1,6 @@
 ## Prerequisite
 ```
-pip3 install ctc && ctc config
+pip3 install ctc && ctc config && ctc setup
 ```
 
 ## Simulation

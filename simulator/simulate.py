@@ -2,6 +2,7 @@ import math
 from utils.const import pool_fee, usd_gas_estimate
 
 from .data import collect, scenarios, SimulatorDataService
+from .data.rpc import getBlockTimeDiff
 from rebalancer import Rebalancer
 from utils.tick import find_tick_index, get_sqrt_ratio_at_tick
 from utils.liquidity import get_liquidity_amounts, get_amounts_for_liquidity
@@ -213,6 +214,7 @@ withdrawn_sims = set()
 rebalancer_map = {}
 sim_usdt_balances = {}
 sim_usdc_balances = {}
+
 data_service = SimulatorDataService()
 def handle_sims(block_number):
   global deposited_sims
@@ -353,8 +355,10 @@ def handle_rebalances():
     data_service.set_position_data(address, (lower_tick, upper_tick))
     rebalance_counter[address] = (rebalance_counter.get(address, 0)) + 1
 
-def print_profits(address, initial_usdc, initial_usdt):
+def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy):
   data = lp_providers.get(address.lower())
+
+  
 
   print("\n\nBalances of {}:".format(address))
   if data is None:
@@ -402,9 +406,66 @@ def print_profits(address, initial_usdc, initial_usdt):
   print("\t\tBal: {}".format(usdt_bal / 10**6))
   print("\t\tFee: {}".format(usdt_fee / 10**6))
 
+# these are used just to figure out possible balance changes `handle_sims` function
+# might have made
+sim_balances_temp = {}
+balance_changes = {
+  'USDT': {},
+  'USDC': {}
+}
+
+def store_simulation_balances():
+  # can not reassign copy to dictionary variable since that created a local variable
+  # rather then accessing a global one
+  sim_balances_temp['USDT'] = sim_usdt_balances.copy()
+  sim_balances_temp['USDC'] = sim_usdc_balances.copy()
+
+# in case amount of usdt/usdc balance of simulation changes record it
+# use `forceRecord` to record the final block even when there are no changes
+async def record_token_balance_changes(block_number, forceRecord=False):
+  temp_tokens = [sim_balances_temp['USDT'], sim_balances_temp['USDC']]
+  stored_tokens = [sim_usdt_balances, sim_usdc_balances]
+
+  # loop through stablecoins
+  for index, sim_token_balance_temp in enumerate(temp_tokens):
+    token = 'USDT' if index == 0 else 'USDC'
+    stored_token_dictionary = stored_tokens[index]
+    # loop through simulation addresses
+    for sim_address in stored_token_dictionary.keys():
+      if sim_address not in balance_changes[token]:
+        balance_changes[token][sim_address] = []
+
+      balance_change = balance_changes[token][sim_address]
+
+      if sim_address not in sim_token_balance_temp:
+        sim_token_balance_temp[sim_address] = 0
+
+      # simulation balance has not changed... continue
+      if sim_token_balance_temp[sim_address] == stored_token_dictionary[sim_address] and not forceRecord:
+        continue
+
+      balance_change_info = {
+        'token': token,
+        'balance': stored_token_dictionary[sim_address],
+        'balance_diff': stored_token_dictionary[sim_address] - sim_token_balance_temp[sim_address],
+        'block_number': block_number,
+        'block_number_end': False, # until what block was this balance
+        'block_range_time_diff': False # amount of seconds between block_number & block_number_end
+      }
+      print("appending info", balance_change_info)
+      balance_changes.append(balance_change_info)
+
+      # not the first balance change
+      if len(balance_change) > 1:
+        previous_balance_change_info = balance_change[-2]
+        previous_balance_change_info['block_number_end'] = block_number - 1
+        previous_balance_change_info['block_range_time_diff'] = await collect(previous_balance_change_info['block_number'], block_number - 1)
+
+
+
+
 async def simulate(start_block, end_block):
   print("Found {} scenarios to simulate".format(len(scenarios)))
-
   data = await collect(start_block, end_block)
 
   total = len(data)
@@ -413,11 +474,15 @@ async def simulate(start_block, end_block):
 
   print("Loaded {} events, processing them now".format(total))
 
+  latest_block_number = 0
   for index, event in data.iterrows():
     block_number = int(event["block_number"])
+    latest_block_number = block_number
     event_name = event["event_name"]
     
+    store_simulation_balances()
     handle_sims(block_number)
+    record_token_balance_changes(block_number)
 
     if event_name == "Mint":
       handle_mint_event(event)
@@ -437,10 +502,13 @@ async def simulate(start_block, end_block):
     if processed % pct5 == 0:
       print("Processed {} events".format(str(math.floor(5 * processed / pct5)) + "%"))
     
-    # if processed % (pct5*4) == 0:
-    #   break
+    if processed % (pct5*4) == 0:
+      break
+
+  record_token_balance_changes(latest_block_number, True)
+  print("balance_changes", balance_changes)
 
   for sim in scenarios:
-    print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6)
+    print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6, sim["non_deployed_apy"])
 
   print("Done!")
