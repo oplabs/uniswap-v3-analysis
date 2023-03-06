@@ -315,25 +315,26 @@ def handle_rebalances():
     
     max_usdc = sim_usdc_balances[address] + (usdc_received * (1 - pool_fee))
     max_usdt = sim_usdt_balances[address] + (usdt_received * (1 - pool_fee))
+
     net_gas_estimate = usd_gas_estimate * 10**6
 
-    if (max_usdc + max_usdt) < net_gas_estimate:
-      # Lost all capital??
-      sim_usdc_balances[address] = max_usdc
-      sim_usdt_balances[address] = max_usdt
-      data_service.pause_position(token_id)
-      continue
-    elif (max_usdc >= net_gas_estimate / 2) and (max_usdt >= net_gas_estimate / 2):
-      max_usdc -= (net_gas_estimate / 2)
-      max_usdt -= (net_gas_estimate / 2)
-    elif max_usdc >= net_gas_estimate:
-      max_usdc -= net_gas_estimate
-    elif max_usdt >= net_gas_estimate:
-      max_usdt -= net_gas_estimate
-    else:
-      new_bal = max_usdc + max_usdt - net_gas_estimate
-      max_usdc = new_bal if max_usdc > max_usdt else 0
-      max_usdt = new_bal if max_usdc <= max_usdt else 0
+    # if (max_usdc + max_usdt) < net_gas_estimate:
+    #   # Lost all capital??
+    #   sim_usdc_balances[address] = max_usdc
+    #   sim_usdt_balances[address] = max_usdt
+    #   data_service.pause_position(token_id)
+    #   continue
+    # elif (max_usdc >= net_gas_estimate / 2) and (max_usdt >= net_gas_estimate / 2):
+    #   max_usdc -= (net_gas_estimate / 2)
+    #   max_usdt -= (net_gas_estimate / 2)
+    # elif max_usdc >= net_gas_estimate:
+    #   max_usdc -= net_gas_estimate
+    # elif max_usdt >= net_gas_estimate:
+    #   max_usdt -= net_gas_estimate
+    # else:
+    #   new_bal = max_usdc + max_usdt - net_gas_estimate
+    #   max_usdc = new_bal if max_usdc > max_usdt else 0
+    #   max_usdt = new_bal if max_usdc <= max_usdt else 0
 
     sim_usdc_balances[address] = max_usdc
     sim_usdt_balances[address] = max_usdt
@@ -355,7 +356,11 @@ def handle_rebalances():
     sim_usdt_balances[address] -= usdt_added
 
     data_service.set_position_data(address, (lower_tick, upper_tick))
-    rebalance_counter[address] = (rebalance_counter.get(address, 0)) + 1
+    if address not in rebalance_counter:
+      rebalance_counter[address] = {'count': 0, 'cost' : 0}
+    
+    rebalance_counter[address]['count'] = (rebalance_counter.get(address).get('count')) + 1
+    rebalance_counter[address]['cost'] = (rebalance_counter.get(address).get('cost')) + net_gas_estimate
 
 # calculate how much strategy would earn if non active funds were deployed to Aave / Compound
 def calculate_aave_profits(non_deployed_apy, sim_balance_ranges_w_time, sim_address):
@@ -411,6 +416,7 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
     net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
     net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
     net_fee = usdc_fee + usdt_fee
+    rebalance_cost = rebalance_counter.get(address, {}).get('cost', 0) / 1e6
 
     initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
     current_value = math.floor((net_usdc + net_usdt) / 10**6)
@@ -422,6 +428,7 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
     apr = calculate_apr_from_profit(diff)
     aave_apr = calculate_apr_from_profit(aave_profits)
     total_apr = calculate_apr_from_profit(aave_profits + diff)
+    total_apr_w_rebalance_gas = calculate_apr_from_profit(aave_profits + diff - rebalance_cost)
 
     growth = math.floor(10000 * diff / initial_deposit) / 100
 
@@ -430,8 +437,7 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
       str(round(to_apy(apr) * 100, 2)) + "%", #APY
       str(round(to_apy(aave_apr) * 100, 2)),
       str(round(to_apy(total_apr) * 100, 2)) + "%", #Total APY
-      str(growth), # growth
-      str(round(simulation_active_time / 86400, 2)) # Days active
+      str(round(to_apy(total_apr_w_rebalance_gas) * 100, 2)) + "%", #total_apr_w_rebalance_gas
     ]]
 
     table_data += [[
@@ -440,36 +446,39 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
       str(initial_deposit), # Initial Deposit Value
       str(current_value), # Current Deposit Value
       str(round(diff, 2)), # Diff in Deposit Value
-      str(round(net_fee / 10**6, 2)), # Net Fee Earned
-      str(rebalance_counter.get(address, 0)), # Total Rebalances
-      str(round(liquidity, 2)) # Net Liquidity
+      str(round(net_fee / 1e6, 2)), # Net Fee Earned
+      str(round(aave_profits / 1e6, 2)), # Aave profits
+      str(rebalance_counter.get(address, {}).get('count')), # Total Re-balances
+      str(round(liquidity, 2)), # Net Liquidity
+      str(round(growth, 2)) + "%", # growth
+      "$" + str(rebalance_cost), # Total Re-balances
+      str(round(simulation_active_time / 86400, 2)) # Days active
     ]]
 
     usdc_table_data += [[
       address,
-      str(round(net_usdc / 10**6, 2)), # Net USDC
-      str(round(usdc_for_liquidity / 10**6, 2)), # Liquidity
-      str(round(usdc_bal / 10**6, 2)), # Bal
-      str(round(usdc_fee / 10**6, 2)), # Fee
+      str(round(net_usdc / 1e6, 2)), # Net USDC
+      str(round(usdc_for_liquidity / 1e6, 2)), # Liquidity
+      str(round(usdc_bal / 1e6, 2)), # Bal
+      str(round(usdc_fee / 1e6, 2)), # Fee
     ]]
 
     usdt_table_data += [[
       address,
-      str(round(net_usdt / 10**6, 2)), # Net USDT
-      str(round(usdt_for_liquidity / 10**6, 2)), # Liquidity
-      str(round(usdt_bal / 10**6, 2)), # Bal
-      str(round(usdt_fee / 10**6, 2)), # Fee
+      str(round(net_usdt / 1e6, 2)), # Net USDT
+      str(round(usdt_for_liquidity / 1e6, 2)), # Liquidity
+      str(round(usdt_bal / 1e6, 2)), # Bal
+      str(round(usdt_fee / 1e6, 2)), # Fee
     ]]
   
   print('')
   print('APY & performance')
   print_table([[
     "Simulation",
-    "APY",
+    "Uni3 Pool APY",
     "Aave APY",
-    "Total APY",
-    "Growth",
-    "Days active"]] + apy_table_data,
+    "Combined APY",
+    "Combined APY (incl. gas cost)"]] + apy_table_data,
     double_hline = True)
 
   print('')
@@ -480,8 +489,12 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
     "Current Dep. Value",
     "Diff in Dep. Value",
     "Net Fee Earned", 
+    "Aave profits",
     "Total Rebalances",
-    "Net Liquidity"]] + table_data,
+    "Net Liquidity",
+    "Growth",
+    "Rebalance Cost",
+    "Sim. Length [Days]"]] + table_data,
     double_hline = True)
 
   print('')
@@ -628,8 +641,8 @@ async def simulate(start_block, end_block):
     if processed % pct5 == 0:
       print("Processed {} events".format(str(math.floor(5 * processed / pct5)) + "%"))
     
-    if processed % (pct5*4) == 0:
-      break
+    # if processed % (pct5*4) == 0:
+    #   break
 
   record_token_balance_changes(latest_block_number, True)
   balance_changes_w_time, sim_balance_ranges_w_time = await add_block_range_times_to_balance_changes(balance_changes, sim_balance_ranges)

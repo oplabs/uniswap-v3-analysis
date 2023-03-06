@@ -20,12 +20,24 @@ rebase_frequencies = [
 
 scenarios = []
 
+def format_investment(number):
+    """
+    format values per thousands : K-thousands, M-millions, B-billions. 
+    
+    """
+    for unit in ['','k','m']:
+        if abs(number) < 1000.0:
+            return f"{number:.0f}{unit}"
+        number /= 1000.0
+    return f"{number:0f}b"
+
 for (usdc_amount, usdt_amount) in deposit_liquidities:
   for tick_range in tick_ranges:
     if enable_rebalancer == True:
       for frequency in rebase_frequencies:
         scenarios.append({
-          "address": "0xsim_{}_{}_{}_{}".format(tick_range, frequency, usdc_amount, usdt_amount),
+          # amounts are financial formatted so that table print in CLI is narrower
+          "address": "0xsim_{}_{}_{}_{}".format(tick_range, frequency, format_investment(usdc_amount), format_investment(usdt_amount)),
           "usdc_amount": usdc_amount,
           "usdt_amount": usdt_amount,
           "deposit_after": 14236000,
@@ -41,7 +53,8 @@ for (usdc_amount, usdt_amount) in deposit_liquidities:
         })
     else:
       scenarios.append({
-        "address": "0xsim_{}_{}_{}".format(tick_range, usdc_amount, usdt_amount),
+        # amounts are financial formatted so that table print in CLI is narrower
+        "address": "0xsim_{}_{}_{}".format(tick_range, format_investment(usdc_amount), format_investment(usdt_amount)),
         "usdc_amount": usdc_amount,
         "usdt_amount": usdt_amount,
         "deposit_after": 14236000,
