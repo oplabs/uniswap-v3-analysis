@@ -1,5 +1,17 @@
 ## Prerequisite
+Create new virtual environment
 ```
+// run below code only once to create virtual environment
+python3 -m venv env-uniswap
+
+// run below code each time you want environment activated
+source env-uniswap/bin/activate
+```
+
+
+```
+// run below code once to install requirements in virtual environment
+pip install -r requirements.txt
 pip3 install ctc && ctc config && ctc setup
 ```
 

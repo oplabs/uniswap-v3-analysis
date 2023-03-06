@@ -7,6 +7,7 @@ from .data.rpc import getBlockTimeDiff
 from rebalancer import Rebalancer
 from utils.tick import find_tick_index, get_sqrt_ratio_at_tick
 from utils.liquidity import get_liquidity_amounts, get_amounts_for_liquidity
+from cli_tables.cli_tables import *
 
 ticks = {}
 lp_providers = {}
@@ -371,71 +372,137 @@ def calculate_aave_profits(non_deployed_apy, sim_balance_ranges_w_time, sim_addr
 
   return profits
 
-def print_profits(address, initial_usdc, initial_usdt, non_deployed_apy, balance_changes_w_time, sim_balance_ranges_w_time):
-  data = lp_providers.get(address.lower())
-  # how long were the funds active in the Uniswap
-  simulation_active_time = sim_balance_ranges_w_time[address]['block_range_time_diff']
-  seconds_in_a_year = 86400 * 365.25
+def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
+  table_data = []
+  apy_table_data = []
+  usdc_table_data = []
+  usdt_table_data = []
+  for scenario in scenarios:
+    address = scenario["address"]
+    initial_usdc = scenario["usdc_amount"] * 10**6
+    initial_usdt = scenario["usdt_amount"] * 10**6
+    non_deployed_apy = scenario["non_deployed_apy"]
 
-  print("\n\nBalances of {}:".format(address))
-  if data is None:
-    print("\tNOT FOUND")
-    return
+    data = lp_providers.get(address.lower())
+    # how long were the funds active in the Uniswap
+    simulation_active_time = sim_balance_ranges_w_time[address]['block_range_time_diff']
+    seconds_in_a_year = 86400 * 365.25
 
-  usdc_fee = data["usdc_profit"]
-  usdt_fee = data["usdt_profit"]
-  usdc_bal = sim_usdc_balances[address]
-  usdt_bal = sim_usdt_balances[address]
-  liquidity = data["net_liquidity"]
+    if data is None:
+      print("\tNOT FOUND")
+      return
 
-  aave_profits = calculate_aave_profits(non_deployed_apy, balance_changes_w_time, address) / 10**6
+    usdc_fee = data["usdc_profit"]
+    usdt_fee = data["usdt_profit"]
+    usdc_bal = sim_usdc_balances[address]
+    usdt_bal = sim_usdt_balances[address]
+    liquidity = data["net_liquidity"]
 
-  event = token_id_mint_map[address]
-  lower_tick = event["arg__tickLower"]
-  upper_tick = event["arg__tickUpper"]
-  ratio_curr = (latest_price_x96 / 2**96) if latest_price_x96 is not None else get_sqrt_ratio_at_tick(0)
-  ratio_a = get_sqrt_ratio_at_tick(lower_tick)
-  ratio_b = get_sqrt_ratio_at_tick(upper_tick)
-  (usdc_for_liquidity, usdt_for_liquidity) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
+    aave_profits = calculate_aave_profits(non_deployed_apy, balance_changes_w_time, address) / 10**6
 
-  net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
-  net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
-  net_fee = usdc_fee + usdt_fee
+    event = token_id_mint_map[address]
+    lower_tick = event["arg__tickLower"]
+    upper_tick = event["arg__tickUpper"]
+    ratio_curr = (latest_price_x96 / 2**96) if latest_price_x96 is not None else get_sqrt_ratio_at_tick(0)
+    ratio_a = get_sqrt_ratio_at_tick(lower_tick)
+    ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+    (usdc_for_liquidity, usdt_for_liquidity) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
 
-  initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
-  current_value = math.floor((net_usdc + net_usdt) / 10**6)
-  diff = current_value - initial_deposit
-  def calculate_apr_from_profit(profit):
-    return (profit / initial_deposit) * seconds_in_a_year / simulation_active_time
+    net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
+    net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
+    net_fee = usdc_fee + usdt_fee
 
-  apr = calculate_apr_from_profit(diff)
-  aave_apr = calculate_apr_from_profit(aave_profits)
-  total_apr = calculate_apr_from_profit(aave_profits + diff)
+    initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
+    current_value = math.floor((net_usdc + net_usdt) / 10**6)
+    diff = current_value - initial_deposit
 
-  growth = math.floor(10000 * diff / initial_deposit) / 100
+    def calculate_apr_from_profit(profit):
+      return (profit / initial_deposit) * seconds_in_a_year / simulation_active_time
 
-  #print("\tAPR: {}%".format(round(apr * 100, 2)))
-  print("\tAPY: {}%".format(round(to_apy(apr) * 100, 2)))
-  print("\tAave APY: {}%".format(round(to_apy(aave_apr) * 100, 2)))
-  print("\tTotal APY: {}%".format(round(to_apy(total_apr) * 100, 2)))
-  print("\tGrowth: {}".format(growth))
-  print("\tInitial Deposit Value: {}".format(initial_deposit))
-  print("\tCurrent Deposit Value: {}".format(current_value))
-  print("\tDiff in Deposit Value: {}".format(diff))
-  print("\tNet Fee Earned: {}".format(net_fee / 10**6))
-  print("\tTotal Rebalances: {}".format(rebalance_counter.get(address, 0)))
-  print("\tNet Liquidity: {}".format(liquidity))
-  print("\tNet USDC: {}".format(net_usdc / 10**6))
-  print("\t\tLiquidity: {}".format(usdc_for_liquidity / 10**6))
-  print("\t\tBal: {}".format(usdc_bal / 10**6))
-  print("\t\tFee: {}".format(usdc_fee / 10**6))
+    apr = calculate_apr_from_profit(diff)
+    aave_apr = calculate_apr_from_profit(aave_profits)
+    total_apr = calculate_apr_from_profit(aave_profits + diff)
 
-  print("\tNet USDT: {}".format((usdt_for_liquidity + usdt_fee + usdt_bal) / 10**6))
-  print("\t\tLiquidity: {}".format(usdt_for_liquidity / 10**6))
-  print("\t\tBal: {}".format(usdt_bal / 10**6))
-  print("\t\tFee: {}".format(usdt_fee / 10**6))
-  print("\tDays active: {}".format(round(simulation_active_time / 86400, 2)))
+    growth = math.floor(10000 * diff / initial_deposit) / 100
 
+    apy_table_data += [[
+      address,
+      str(round(to_apy(apr) * 100, 2)) + "%", #APY
+      str(round(to_apy(aave_apr) * 100, 2)),
+      str(round(to_apy(total_apr) * 100, 2)) + "%", #Total APY
+      str(growth), # growth
+      str(round(simulation_active_time / 86400, 2)) # Days active
+    ]]
+
+    table_data += [[
+      #str(round(apr * 100, 2)) + "%", #APY
+      address,
+      str(initial_deposit), # Initial Deposit Value
+      str(current_value), # Current Deposit Value
+      str(round(diff, 2)), # Diff in Deposit Value
+      str(round(net_fee / 10**6, 2)), # Net Fee Earned
+      str(rebalance_counter.get(address, 0)), # Total Rebalances
+      str(round(liquidity, 2)) # Net Liquidity
+    ]]
+
+    usdc_table_data += [[
+      address,
+      str(round(net_usdc / 10**6, 2)), # Net USDC
+      str(round(usdc_for_liquidity / 10**6, 2)), # Liquidity
+      str(round(usdc_bal / 10**6, 2)), # Bal
+      str(round(usdc_fee / 10**6, 2)), # Fee
+    ]]
+
+    usdt_table_data += [[
+      address,
+      str(round(net_usdt / 10**6, 2)), # Net USDT
+      str(round(usdt_for_liquidity / 10**6, 2)), # Liquidity
+      str(round(usdt_bal / 10**6, 2)), # Bal
+      str(round(usdt_fee / 10**6, 2)), # Fee
+    ]]
+  
+  print('')
+  print('APY & performance')
+  print_table([[
+    "Simulation",
+    "APY",
+    "Aave APY",
+    "Total APY",
+    "Growth",
+    "Days active"]] + apy_table_data,
+    double_hline = True)
+
+  print('')
+  print('Total Deposits/Balances')
+  print_table([[
+    "Simulation",
+    "Initial Dep. Value",
+    "Current Dep. Value",
+    "Diff in Dep. Value",
+    "Net Fee Earned", 
+    "Total Rebalances",
+    "Net Liquidity"]] + table_data,
+    double_hline = True)
+
+  print('')
+  print('USDC')
+  print_table([[
+    "Simulation",
+    "Net USDC",
+    "Liquidity",
+    "Bal",
+    "Fee",
+  ]] + usdc_table_data, double_hline = True)
+
+  print('')
+  print('USDT')
+  print_table([[
+    "Simulation",
+    "Net USDT",
+    "Liquidity",
+    "Bal",
+    "Fee"
+  ]] + usdt_table_data, double_hline = True)
 
 # these are used just to figure out possible balance changes `handle_sims` function
 # might have made
@@ -561,13 +628,12 @@ async def simulate(start_block, end_block):
     if processed % pct5 == 0:
       print("Processed {} events".format(str(math.floor(5 * processed / pct5)) + "%"))
     
-    #if processed % (pct5*4) == 0:
-    #  break
+    if processed % (pct5*4) == 0:
+      break
 
   record_token_balance_changes(latest_block_number, True)
   balance_changes_w_time, sim_balance_ranges_w_time = await add_block_range_times_to_balance_changes(balance_changes, sim_balance_ranges)
 
-  for sim in scenarios:
-    print_profits(sim["address"], sim["usdc_amount"] * 10**6, sim["usdt_amount"] * 10**6, sim["non_deployed_apy"], balance_changes_w_time, sim_balance_ranges_w_time)
+  print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time)
 
   print("Done!")
