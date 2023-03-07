@@ -8,7 +8,6 @@ from pathlib import Path
 from utils.const import pool, nft_manager
 
 curr_dir = os.path.dirname(os.path.realpath(__file__))
-cache_data_file = os.path.join(curr_dir, "chaindata.csv")
 
 async def _read_from_chain(start_block, end_block):
   swaps, mints, increases, decreases, transfers = await asyncio.gather(  
@@ -60,8 +59,9 @@ async def _read_from_chain(start_block, end_block):
   )
 
 async def collect(start_block, end_block):
-  cached_data = Path(cache_data_file).exists()
+  cache_data_file = os.path.join(curr_dir, "chaindata_{}_{}.csv".format(start_block, end_block))
 
+  cached_data = Path(cache_data_file).exists()
   data = None
 
   if cached_data: 
