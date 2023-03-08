@@ -1,4 +1,8 @@
 venv
+env-uniswap
 out
 **/chaindata.csv
+**/chaindata*.csv
 __pycache__
+todo.txt
+*.DS_Store
