@@ -1,20 +1,25 @@
+# IMPORTANT(!) the scenarios are going to along side one another. Meaning that
+# the more scenarios that are concurrently running, the more they are "stealing"
+# the profits from one another.
+
 enable_rebalancer = True
 deposit_liquidities = [
   # (50000, 50000),
-  (500000, 500000),
+    (500000, 500000),
   # (2500000, 2500000),
 ]
 tick_ranges = [
   1, 
-  2, 
-  4, 
+  #2, 
+  #4, 
   #8, 
   #10, 
   #100,
 ]
 rebase_frequencies = [
-  #0,
-  10,
+  0,
+  #10,
+  #2000
   #100,
 ]
 

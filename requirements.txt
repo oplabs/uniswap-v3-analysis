@@ -1,1 +1,2 @@
 cli-tables==0.0.2
+matplotlib==3.7.1

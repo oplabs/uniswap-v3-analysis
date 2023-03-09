@@ -147,7 +147,10 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
 
       lp_providers[addr] = lp_provider
 
-
+amount_swapped = {
+  'within_tick': 0,
+  'accross_ticks': 0
+}
 def handle_swap_event(event):
   global net_liquidity
   global net_usdc_fee
@@ -155,6 +158,7 @@ def handle_swap_event(event):
   global last_tick
   global latest_price_x96
   global latest_price
+  global amount_swapped
 
   curr_tick = int(event["arg__tick"])
   liquidity = int(event["arg__liquidity"])
@@ -165,8 +169,19 @@ def handle_swap_event(event):
   first_swap = last_tick is None 
   is_multi_tick = last_tick != curr_tick and not first_swap
 
-  usdc_fee = abs(amount0) * pool_fee
-  usdt_fee = abs(amount1) * pool_fee
+  usdc_fee = usdt_fee = 0
+  if amount0 > 0:
+    usdc_fee = abs(amount0) * pool_fee
+    if is_multi_tick:
+      amount_swapped['accross_ticks'] += amount0
+    else:
+      amount_swapped['within_tick'] += amount0
+  else: 
+    usdt_fee = abs(amount1) * pool_fee
+    if is_multi_tick:
+      amount_swapped['accross_ticks'] += amount1
+    else:
+      amount_swapped['within_tick'] += amount1
   
   net_usdc_fee += usdc_fee
   net_usdt_fee += usdt_fee
@@ -382,6 +397,9 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
   apy_table_data = []
   usdc_table_data = []
   usdt_table_data = []
+  global amount_swapped
+
+  print("Total amount of funds swapped withing a tick: {} across ticks: {} ratio: {}".format(amount_swapped['within_tick'] / 1e6, amount_swapped['accross_ticks'] / 1e6, (amount_swapped['accross_ticks']/amount_swapped['within_tick'])))
   for scenario in scenarios:
     address = scenario["address"]
     initial_usdc = scenario["usdc_amount"] * 10**6
