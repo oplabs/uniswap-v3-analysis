@@ -9,6 +9,7 @@ from utils.tick import find_tick_index, get_sqrt_ratio_at_tick
 from utils.liquidity import get_liquidity_amounts, get_amounts_for_liquidity
 from cli_tables.cli_tables import *
 
+#### Global vars (Snapshot-able) ####
 ticks = {}
 lp_providers = {}
 
@@ -23,6 +24,108 @@ net_usdt_fee = 0
 mint_ev_map = {}
 token_id_owner_map = {}
 token_id_mint_map = {}
+
+amount_swapped = {
+  'within_tick': 0,
+  'accross_ticks': 0
+}
+
+deposited_sims = set()
+withdrawn_sims = set()
+rebalancer_map = {}
+sim_usdt_balances = {}
+sim_usdc_balances = {}
+
+data_service = SimulatorDataService()
+rebalance_counter = {}
+
+# these are used just to figure out possible balance changes `handle_sims` function
+# might have made
+sim_balances_temp = {}
+# first & last block of scenario with balance - for APR calculation
+sim_balance_ranges = {}
+balance_changes = {
+  'USDT': {},
+  'USDC': {}
+}
+#### end of Snapshot-able Global vars ####
+deposit_after = 0
+snapshot = {}
+
+# saves a snapshot of the global state
+def save_snapshot():
+  global snapshot
+  snapshot = {
+    'ticks': ticks,
+    'lp_providers': lp_providers,
+    'last_tick': last_tick,
+    'latest_price': latest_price,
+    'latest_price_x96': latest_price_x96,
+    'net_liquidity': net_liquidity,
+    'net_usdc_fee': net_usdc_fee,
+    'net_usdt_fee': net_usdt_fee,
+    'mint_ev_map': mint_ev_map,
+    'token_id_owner_map': token_id_owner_map,
+    'token_id_mint_map': token_id_mint_map,
+    'amount_swapped': amount_swapped,
+    'deposited_sims': deposited_sims,
+    'withdrawn_sims': withdrawn_sims,
+    'rebalancer_map': rebalancer_map,
+    'sim_usdt_balances': sim_usdt_balances,
+    'sim_usdc_balances': sim_usdc_balances,
+    'data_service': data_service,
+    'rebalance_counter': rebalance_counter,
+    'sim_balances_temp': sim_balances_temp,
+    'sim_balance_ranges': sim_balance_ranges,
+    'balance_changes': balance_changes
+  }
+
+def load_snapshot():
+  global ticks
+  global lp_providers
+  global last_tick
+  global latest_price
+  global latest_price_x96
+  global net_liquidity
+  global net_usdc_fee
+  global net_usdt_fee
+  global mint_ev_map
+  global token_id_owner_map
+  global token_id_mint_map
+  global amount_swapped
+  global deposited_sims
+  global withdrawn_sims
+  global rebalancer_map
+  global sim_usdt_balances
+  global sim_usdc_balances
+  global data_service
+  global rebalance_counter
+  global sim_balances_temp
+  global sim_balance_ranges
+  global balance_changes
+
+  ticks = snapshot['ticks']
+  lp_providers = snapshot['lp_providers']
+  last_tick = snapshot['last_tick']
+  latest_price = snapshot['latest_price']
+  latest_price_x96 = snapshot['latest_price_x96']
+  net_liquidity = snapshot['net_liquidity']
+  net_usdc_fee = snapshot['net_usdc_fee']
+  net_usdt_fee = snapshot['net_usdt_fee']
+  mint_ev_map = snapshot['mint_ev_map']
+  token_id_owner_map = snapshot['token_id_owner_map']
+  token_id_mint_map = snapshot['token_id_mint_map']
+  amount_swapped = snapshot['amount_swapped']
+  deposited_sims = snapshot['deposited_sims']
+  withdrawn_sims = snapshot['withdrawn_sims']
+  rebalancer_map = snapshot['rebalancer_map']
+  sim_usdt_balances = snapshot['sim_usdt_balances']
+  sim_usdc_balances = snapshot['sim_usdc_balances']
+  data_service = snapshot['data_service']
+  rebalance_counter = snapshot['rebalance_counter']
+  sim_balances_temp = snapshot['sim_balances_temp']
+  sim_balance_ranges = snapshot['sim_balance_ranges']
+  balance_changes = snapshot['balance_changes']
 
 def handle_mint_event(event):
   key = event["block_hash"] + "_" + event["transaction_hash"]
@@ -147,10 +250,6 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
 
       lp_providers[addr] = lp_provider
 
-amount_swapped = {
-  'within_tick': 0,
-  'accross_ticks': 0
-}
 def handle_swap_event(event):
   global net_liquidity
   global net_usdc_fee
@@ -226,13 +325,6 @@ def find_token_split(max_usdc_amount, max_usdt_amount, lower_tick, upper_tick):
   (usdc_amount, usdt_amount) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity)
   return (usdc_amount, usdt_amount, liquidity)
 
-deposited_sims = set()
-withdrawn_sims = set()
-rebalancer_map = {}
-sim_usdt_balances = {}
-sim_usdc_balances = {}
-
-data_service = SimulatorDataService()
 def handle_sims(block_number):
   global deposited_sims
   global withdrawn_sims
@@ -251,7 +343,6 @@ def handle_sims(block_number):
     address = sim["address"].lower()
     token_id = address
 
-    deposit_after = sim.get("deposit_after", 0)
     withdraw_before = sim.get("withdraw_before", 0)
 
     enable_rebalancer = sim.get("enable_rebalancer", False)
@@ -318,7 +409,6 @@ def handle_sims(block_number):
       sim_usdc_balances[address] += usdc_amount
       sim_usdt_balances[address] += usdt_amount
 
-rebalance_counter = {}
 def handle_rebalances():
   rebalance_requests = data_service.get_rebalance_requests()
   for [address, lower_tick, upper_tick] in rebalance_requests:
@@ -535,16 +625,6 @@ def print_profits(scenarios, balance_changes_w_time, sim_balance_ranges_w_time):
     "Fee"
   ]] + usdt_table_data, double_hline = True)
 
-# these are used just to figure out possible balance changes `handle_sims` function
-# might have made
-sim_balances_temp = {}
-# first & last block of scenario with balance - for APR calculation
-sim_balance_ranges = {}
-balance_changes = {
-  'USDT': {},
-  'USDC': {}
-}
-
 def store_simulation_balances():
   # can not reassign copy to dictionary variable since that created a local variable
   # rather then accessing a global one
@@ -621,15 +701,24 @@ def to_apy(apr, days=30.00):
     periods_per_year = Decimal(365.25 / days)
     return ((1 + Decimal(apr) / periods_per_year / 100) ** periods_per_year - 1) * 100
 
+prewarm_done = False
+# Testing has demonstrated that we need to preload 2.7 mio of blocks before starting the simulation
+# to `pre-warm` the Uniswap pool with balances in a way that the simulation can be ran on a close
+# to mainnet state
+CONST_PREWARM_BLOCKS = 2700000
 async def simulate(start_block, end_block):
+  global deposit_after
+  prewarm_start_block = int(start_block) - CONST_PREWARM_BLOCKS
+  deposit_after = int(start_block)
   print("Found {} scenarios to simulate".format(len(scenarios)))
-  data = await collect(start_block, end_block)
+  data = await collect(prewarm_start_block, end_block)
 
   total = len(data)
   processed = 0
   pct5 = math.floor(5 * total / 100)
 
-  print("Loaded {} events, processing them now".format(total))
+  print("Loaded {} events and processing them now".format(total))
+  print("Pre-warming the Uniswap pool starting at block {}".format(prewarm_start_block))
 
   latest_block_number = 0
   for index, event in data.iterrows():
@@ -637,6 +726,12 @@ async def simulate(start_block, end_block):
     latest_block_number = block_number
     event_name = event["event_name"]
     
+    global prewarm_done 
+    if block_number >= int(start_block) - 1 and not prewarm_done:
+      prewarm_done = True
+      print("Pre-warm done at block {}. Creating a snapshot".format(block_number))
+      save_snapshot()
+
     store_simulation_balances()
     handle_sims(block_number)
     record_token_balance_changes(block_number)
