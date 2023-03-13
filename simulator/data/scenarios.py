@@ -6,9 +6,16 @@ enable_rebalancer = True
 deposit_liquidities = [
   # (50000, 50000),
     (500000, 500000),
-    (501000, 501000),
-    (502000, 502000),
-  # (2500000, 2500000),
+    (1000000, 1000000),
+    (1500000, 1500000),
+    (2000000, 2000000),
+    (2500000, 2500000),
+    (3000000, 3000000),
+    (3500000, 3500000),
+    (4000000, 4000000),
+    (5000000, 5000000),
+    (5500000, 5500000),
+    (6000000, 6000000),
 ]
 tick_ranges = [
   1,
@@ -40,36 +47,22 @@ def format_investment(number):
 
 for (usdc_amount, usdt_amount) in deposit_liquidities:
   for tick_range in tick_ranges:
-    if enable_rebalancer == True:
-      for frequency in rebase_frequencies:
-        scenarios.append({
-          # amounts are financial formatted so that table print in CLI is narrower
-          "address": "0xsim_{}_{}_{}_{}".format(tick_range, frequency, format_investment(usdc_amount), format_investment(usdt_amount)),
-          "usdc_amount": usdc_amount,
-          "usdt_amount": usdt_amount,
-          "withdraw_before": 0,
-          "lower_tick": 1 - (tick_range * 0.0001),
-          "upper_tick": 1 + (tick_range * 0.0001),
-          "enable_rebalancer": enable_rebalancer,
-          "rebalance_frequency": frequency,
-          "target_tick_range": tick_range,
-          # how much APY are non Uniswap deployed funds earning? (e.g. deployed in Aave)
-          # 1 -> 100%, 0.02 -> 2%
-          "non_deployed_apy": 0.02,
-        })
-    else:
+    for frequency in rebase_frequencies:
       scenarios.append({
         # amounts are financial formatted so that table print in CLI is narrower
-        "address": "0xsim_{}_{}_{}".format(tick_range, format_investment(usdc_amount), format_investment(usdt_amount)),
+        "address": "0xsim_{}_{}_{}_{}".format(tick_range, frequency, format_investment(usdc_amount), format_investment(usdt_amount)),
         "usdc_amount": usdc_amount,
         "usdt_amount": usdt_amount,
         "withdraw_before": 0,
         "lower_tick": 1 - (tick_range * 0.0001),
         "upper_tick": 1 + (tick_range * 0.0001),
-        "enable_rebalancer": False,
+        "enable_rebalancer": enable_rebalancer,
+        "rebalance_frequency": frequency,
+        "target_tick_range": tick_range,
+        # how much APY are non Uniswap deployed funds earning? (e.g. deployed in Aave)
+        # 1 -> 100%, 0.02 -> 2%
         "non_deployed_apy": 0.02,
       })
-
 
 # scenarios = [
 #   # Rebalance Frequency: 0, 

@@ -2,7 +2,8 @@ import math
 import copy
 from decimal import Decimal
 from utils.const import pool_fee, usd_gas_estimate
-from utils import deepcopy
+import pickle
+from matplotlib import pyplot as plt
 
 from .data import collect, scenarios, SimulatorDataService
 from .data.rpc import getBlockTimeDiff
@@ -51,37 +52,44 @@ balance_changes = {
   'USDC': {}
 }
 #### end of Snapshot-able Global vars ####
+
+#### NON Snapshot-able Global vars ####
 deposit_after = 0
 snapshot = {}
 prewarm_done = False
+
+table_data = []
+apy_table_data = []
+usdc_table_data = []
+usdt_table_data = []
 
 # saves a snapshot of the global state
 def save_snapshot(block_number):
   global snapshot
 
   snapshot = {
-    'ticks': deepcopy(ticks),
-    'lp_providers': deepcopy(lp_providers),
+    'ticks': pickle.dumps(ticks, -1),
+    'lp_providers': pickle.dumps(lp_providers, -1),
     'last_tick': last_tick,
     'latest_price': latest_price,
     'latest_price_x96': latest_price_x96,
     'net_liquidity': net_liquidity,
     'net_usdc_fee': net_usdc_fee,
     'net_usdt_fee': net_usdt_fee,
-    'mint_ev_map': deepcopy(mint_ev_map),
-    'token_id_owner_map': deepcopy(token_id_owner_map),
-    'token_id_mint_map': deepcopy(token_id_mint_map),
-    'amount_swapped': deepcopy(amount_swapped),
+    'mint_ev_map': pickle.dumps(mint_ev_map, -1),
+    'token_id_owner_map': pickle.dumps(token_id_owner_map, -1),
+    'token_id_mint_map': pickle.dumps(token_id_mint_map, -1),
+    'amount_swapped': pickle.dumps(amount_swapped, -1),
     'deposited_sims': deposited_sims.copy(),
     'withdrawn_sims': withdrawn_sims.copy(),
-    'rebalancer_map': deepcopy(rebalancer_map),
-    'sim_usdt_balances': deepcopy(sim_usdt_balances),
-    'sim_usdc_balances': deepcopy(sim_usdc_balances),
-    'data_service': deepcopy(data_service),
-    'rebalance_counter': deepcopy(rebalance_counter),
-    'sim_balances_temp': deepcopy(sim_balances_temp),
-    'sim_balance_ranges': deepcopy(sim_balance_ranges),
-    'balance_changes': deepcopy(balance_changes)
+    'rebalancer_map': pickle.dumps(rebalancer_map, -1),
+    'sim_usdt_balances': pickle.dumps(sim_usdt_balances, -1),
+    'sim_usdc_balances': pickle.dumps(sim_usdc_balances, -1),
+    'data_service': pickle.dumps(data_service, -1),
+    'rebalance_counter': pickle.dumps(rebalance_counter, -1),
+    'sim_balances_temp': pickle.dumps(sim_balances_temp, -1),
+    'sim_balance_ranges': pickle.dumps(sim_balance_ranges, -1),
+    'balance_changes': pickle.dumps(balance_changes, -1)
   }
   print("Saving snapshot at block {}".format(block_number))
 
@@ -109,28 +117,28 @@ def load_snapshot(block_number):
   global sim_balance_ranges
   global balance_changes
 
-  ticks = deepcopy(snapshot['ticks'])
-  lp_providers = deepcopy(snapshot['lp_providers'])
+  ticks = pickle.loads(snapshot['ticks'])
+  lp_providers = pickle.loads(snapshot['lp_providers'])
   last_tick = snapshot['last_tick']
   latest_price = snapshot['latest_price']
   latest_price_x96 = snapshot['latest_price_x96']
   net_liquidity = snapshot['net_liquidity']
   net_usdc_fee = snapshot['net_usdc_fee']
   net_usdt_fee = snapshot['net_usdt_fee']
-  mint_ev_map = deepcopy(snapshot['mint_ev_map'])
-  token_id_owner_map = deepcopy(snapshot['token_id_owner_map'])
-  token_id_mint_map = deepcopy(snapshot['token_id_mint_map'])
-  amount_swapped = deepcopy(snapshot['amount_swapped'])
+  mint_ev_map = pickle.loads(snapshot['mint_ev_map'])
+  token_id_owner_map = pickle.loads(snapshot['token_id_owner_map'])
+  token_id_mint_map = pickle.loads(snapshot['token_id_mint_map'])
+  amount_swapped = pickle.loads(snapshot['amount_swapped'])
   deposited_sims = snapshot['deposited_sims'].copy()
   withdrawn_sims = snapshot['withdrawn_sims'].copy()
-  rebalancer_map = deepcopy(snapshot['rebalancer_map'])
-  sim_usdt_balances = deepcopy(snapshot['sim_usdt_balances'])
-  sim_usdc_balances = deepcopy(snapshot['sim_usdc_balances'])
-  data_service = deepcopy(snapshot['data_service'])
-  rebalance_counter = deepcopy(snapshot['rebalance_counter'])
-  sim_balances_temp = deepcopy(snapshot['sim_balances_temp'])
-  sim_balance_ranges = deepcopy(snapshot['sim_balance_ranges'])
-  balance_changes = deepcopy(snapshot['balance_changes'])
+  rebalancer_map = pickle.loads(snapshot['rebalancer_map'])
+  sim_usdt_balances = pickle.loads(snapshot['sim_usdt_balances'])
+  sim_usdc_balances = pickle.loads(snapshot['sim_usdc_balances'])
+  data_service = pickle.loads(snapshot['data_service'])
+  rebalance_counter = pickle.loads(snapshot['rebalance_counter'])
+  sim_balances_temp = pickle.loads(snapshot['sim_balances_temp'])
+  sim_balance_ranges = pickle.loads(snapshot['sim_balance_ranges'])
+  balance_changes = pickle.loads(snapshot['balance_changes'])
 
   print("Snapshot loaded at block {}".format(block_number))
 
@@ -488,11 +496,11 @@ def calculate_aave_profits(non_deployed_apy, sim_balance_ranges_w_time, sim_addr
 
   return profits
 
-def print_profits(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
-  table_data = []
-  apy_table_data = []
-  usdc_table_data = []
-  usdt_table_data = []
+def store_results(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
+  global table_data
+  global apy_table_data
+  global usdc_table_data
+  global usdt_table_data
   global amount_swapped
 
   print("Total amount of funds swapped withing a tick: {} across ticks: {} ratio: {}".format(amount_swapped['within_tick'] / 1e6, amount_swapped['accross_ticks'] / 1e6, (amount_swapped['accross_ticks']/amount_swapped['within_tick'])))
@@ -545,12 +553,24 @@ def print_profits(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
 
   growth = math.floor(10000 * diff / initial_deposit) / 100
 
+  apy = to_apy(apr)
+  aave_apy = to_apy(aave_apr)
+  total_apy = to_apy(total_apr)
+  total_apy_w_rebalance_gas = to_apy(total_apr_w_rebalance_gas)
+
+  scenario['results'] = {
+    'apy': apy,
+    'aave_apy': aave_apy,
+    'total_apy': total_apy,
+    'total_apy_w_rebalance_gas': total_apy_w_rebalance_gas
+  }
+
   apy_table_data += [[
     address,
-    str(round(to_apy(apr) * 100, 2)) + "%", #APY
-    str(round(to_apy(aave_apr) * 100, 2)),
-    str(round(to_apy(total_apr) * 100, 2)) + "%", #Total APY
-    str(round(to_apy(total_apr_w_rebalance_gas) * 100, 2)) + "%", #total_apr_w_rebalance_gas
+    str(round(apy * 100, 2)) + "%", #APY
+    str(round(aave_apy * 100, 2)),
+    str(round(total_apy * 100, 2)) + "%", #Total APY
+    str(round(total_apy_w_rebalance_gas * 100, 2)) + "%", #total_apr_w_rebalance_gas
   ]]
 
   table_data += [[
@@ -584,6 +604,7 @@ def print_profits(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
     str(round(usdt_fee / 1e6, 2)), # Fee
   ]]
   
+def print_results():
   print('')
   print('APY & performance')
   print_table([[
@@ -629,6 +650,30 @@ def print_profits(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
     "Bal",
     "Fee"
   ]] + usdt_table_data, double_hline = True)
+
+  print_apy_chart()
+
+
+def print_apy_chart():
+  fig = plt.figure()
+  ax = fig.add_subplot(111)
+
+  X = []
+  Y = []
+  for scenario in scenarios:
+    X += [scenario['usdc_amount'] + scenario['usdt_amount']]
+    #Y += [round(scenario['results']['apy'] * 100, 2)]
+    Y += [round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)]
+
+
+  ax.plot(X,Y)
+  for index, xy in enumerate(zip(X, Y)):
+    scenario = scenarios[index]
+    #ax.annotate('(%s, %s)' % xy, xy=xy, textcoords='data') # <--
+    ax.annotate('{}'.format(scenario['address']), xy=xy, textcoords='data') # <--
+
+  ax.grid()
+  plt.show()
 
 def store_simulation_balances():
   # can not reassign copy to dictionary variable since that created a local variable
@@ -709,8 +754,8 @@ def to_apy(apr, days=30.00):
 # Testing has demonstrated that we need to preload 2.7 mio of blocks before starting the simulation
 # to `pre-warm` the Uniswap pool with balances in a way that the simulation can be ran on a close
 # to mainnet state
-#CONST_PREWARM_BLOCKS = 2700000
-CONST_PREWARM_BLOCKS = 270000
+CONST_PREWARM_BLOCKS = 2700000
+#CONST_PREWARM_BLOCKS = 270000
 async def simulate(start_block, end_block):
   global deposit_after
   global prewarm_done
@@ -773,6 +818,5 @@ async def simulate(start_block, end_block):
     record_token_balance_changes(latest_block_number, True)
     balance_changes_w_time, sim_balance_ranges_w_time = await add_block_range_times_to_balance_changes(balance_changes, sim_balance_ranges)
 
-    print_profits(scenario, balance_changes_w_time, sim_balance_ranges_w_time)
-
-    print("Done!")
+    store_results(scenario, balance_changes_w_time, sim_balance_ranges_w_time)
+  print_results()
