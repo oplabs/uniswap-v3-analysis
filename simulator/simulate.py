@@ -656,12 +656,16 @@ def print_results():
 
 def print_apy_chart():
   fig = plt.figure()
+
   ax = fig.add_subplot(111)
+
+  plt.xlabel('Funds Deployed [million]')
+  plt.ylabel('Total APY [%]')
 
   X = []
   Y = []
   for scenario in scenarios:
-    X += [scenario['usdc_amount'] + scenario['usdt_amount']]
+    X += [(scenario['usdc_amount'] + scenario['usdt_amount']) / 1e6]
     #Y += [round(scenario['results']['apy'] * 100, 2)]
     Y += [round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)]
 
@@ -670,9 +674,11 @@ def print_apy_chart():
   for index, xy in enumerate(zip(X, Y)):
     scenario = scenarios[index]
     #ax.annotate('(%s, %s)' % xy, xy=xy, textcoords='data') # <--
-    ax.annotate('{}'.format(scenario['address']), xy=xy, textcoords='data') # <--
+    #ax.annotate('{}'.format(scenario['address']), xy=xy, textcoords='data') # <--
+    ax.annotate('{}'.format(round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)), xy=xy, textcoords='data')
 
   ax.grid()
+
   plt.show()
 
 def store_simulation_balances():
@@ -754,9 +760,13 @@ def to_apy(apr, days=30.00):
 # Testing has demonstrated that we need to preload 2.7 mio of blocks before starting the simulation
 # to `pre-warm` the Uniswap pool with balances in a way that the simulation can be ran on a close
 # to mainnet state
+
 CONST_PREWARM_BLOCKS = 2700000
 #CONST_PREWARM_BLOCKS = 270000
 async def simulate(start_block, end_block):
+  if (start_block > end_block):
+    raise Exception("start_block needs to be larger than end_block")
+
   global deposit_after
   global prewarm_done
   deposit_after = int(start_block)

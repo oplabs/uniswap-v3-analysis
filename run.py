@@ -14,13 +14,13 @@ from simulator import simulate
 #start_block = "16677020"
 #end_block = "16777020"
 
-# 2 days
-start_block = "16706020"
-end_block = "16777020"
+# 10 days
+# start_block = "16706020"
+# end_block = "16777020"
 
-# 0.28 days -> 700% APY?
-#start_block = "16677020"
-#end_block = "16777020"
+# ~3 days
+start_block = "16799063" # 13th Mar
+end_block = "16819063" # 10th Mar
 
 async def main():
   await simulate(start_block, end_block)
