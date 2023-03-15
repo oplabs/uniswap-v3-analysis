@@ -56,7 +56,7 @@ def get_amounts_for_liquidity(ratio, ratio_a, ratio_b, liquidity):
     amount0 = get_amount0_for_liquidity(ratio, ratio_b, liquidity)
     amount1 = get_amount1_for_liquidity(ratio_a, ratio, liquidity)
   else:
-    amount1 = get_amount0_for_liquidity(ratio_a, ratio_b, liquidity)
+    amount1 = get_amount1_for_liquidity(ratio_a, ratio_b, liquidity)
     
   return (amount0, amount1)
 
