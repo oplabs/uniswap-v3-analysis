@@ -520,15 +520,6 @@ def handle_rebalances():
     liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
     (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
 
-    is_simulation_address = address.startswith("0xsim")
-    if is_simulation_address and usdt_added > max_usdt:
-      liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
-      (new_usdc, new_usdt) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b, liquidity_to_add)
-      print("DEBUG: ", ratio_curr, ratio_a, ratio_b)
-      #print("MISTAKAS!", usdc_added / 1e6, usdt_added / 1e6, liquidity_to_add / 1e6, max_usdt / 1e6)
-      #print(liquidity_to_add / 1e6)
-      #print("LIQUIDITY DEBUG: ", liquidity_to_add / 1e12, get_liquidity_amounts(ratio_curr, ratio_a, ratio_b))
-
     sim_usdc_balances[address] -= usdc_added
     sim_usdt_balances[address] -= usdt_added
 
