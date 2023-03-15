@@ -3,11 +3,12 @@ import copy
 from decimal import Decimal
 from utils.const import pool_fee, usd_gas_estimate
 import pickle
+import ujson
 from matplotlib import pyplot as plt
 
 from .data import collect, scenarios, SimulatorDataService
-from .data.rpc import getBlockTimeDiff
-from rebalancer import Rebalancer
+from .data.rpc import blockNumberListToTimestamp
+from rebalancer import Rebalancer, CustomRebalancer
 from utils.tick import find_tick_index, get_sqrt_ratio_at_tick
 from utils.liquidity import get_liquidity_amounts, get_amounts_for_liquidity
 from cli_tables.cli_tables import *
@@ -51,6 +52,8 @@ balance_changes = {
   'USDT': {},
   'USDC': {}
 }
+# simulation earnings broken down by block ranges
+sim_earnings_per_block = {}
 #### end of Snapshot-able Global vars ####
 
 #### NON Snapshot-able Global vars ####
@@ -63,33 +66,36 @@ apy_table_data = []
 usdc_table_data = []
 usdt_table_data = []
 
+serialize_engine = pickle
+#serialize_engine = ujson
+
 # saves a snapshot of the global state
 def save_snapshot(block_number):
   global snapshot
-
   snapshot = {
-    'ticks': pickle.dumps(ticks, -1),
-    'lp_providers': pickle.dumps(lp_providers, -1),
+    'ticks': serialize_engine.dumps(ticks, -1),
+    'lp_providers': serialize_engine.dumps(lp_providers, -1),
     'last_tick': last_tick,
     'latest_price': latest_price,
     'latest_price_x96': latest_price_x96,
     'net_liquidity': net_liquidity,
     'net_usdc_fee': net_usdc_fee,
     'net_usdt_fee': net_usdt_fee,
-    'mint_ev_map': pickle.dumps(mint_ev_map, -1),
-    'token_id_owner_map': pickle.dumps(token_id_owner_map, -1),
-    'token_id_mint_map': pickle.dumps(token_id_mint_map, -1),
-    'amount_swapped': pickle.dumps(amount_swapped, -1),
+    'mint_ev_map': serialize_engine.dumps(mint_ev_map, -1),
+    'token_id_owner_map': serialize_engine.dumps(token_id_owner_map, -1),
+    'token_id_mint_map': serialize_engine.dumps(token_id_mint_map, -1),
+    'amount_swapped': serialize_engine.dumps(amount_swapped, -1),
     'deposited_sims': deposited_sims.copy(),
     'withdrawn_sims': withdrawn_sims.copy(),
-    'rebalancer_map': pickle.dumps(rebalancer_map, -1),
-    'sim_usdt_balances': pickle.dumps(sim_usdt_balances, -1),
-    'sim_usdc_balances': pickle.dumps(sim_usdc_balances, -1),
-    'data_service': pickle.dumps(data_service, -1),
-    'rebalance_counter': pickle.dumps(rebalance_counter, -1),
-    'sim_balances_temp': pickle.dumps(sim_balances_temp, -1),
-    'sim_balance_ranges': pickle.dumps(sim_balance_ranges, -1),
-    'balance_changes': pickle.dumps(balance_changes, -1)
+    'rebalancer_map': serialize_engine.dumps(rebalancer_map, -1),
+    'sim_usdt_balances': serialize_engine.dumps(sim_usdt_balances, -1),
+    'sim_usdc_balances': serialize_engine.dumps(sim_usdc_balances, -1),
+    'data_service': serialize_engine.dumps(data_service, -1),
+    'rebalance_counter': serialize_engine.dumps(rebalance_counter, -1),
+    'sim_balances_temp': serialize_engine.dumps(sim_balances_temp, -1),
+    'sim_balance_ranges': serialize_engine.dumps(sim_balance_ranges, -1),
+    'balance_changes': serialize_engine.dumps(balance_changes, -1),
+    'sim_earnings_per_block': serialize_engine.dumps(sim_earnings_per_block, -1),
   }
   print("Saving snapshot at block {}".format(block_number))
 
@@ -116,29 +122,31 @@ def load_snapshot(block_number):
   global sim_balances_temp
   global sim_balance_ranges
   global balance_changes
+  global sim_earnings_per_block
 
-  ticks = pickle.loads(snapshot['ticks'])
-  lp_providers = pickle.loads(snapshot['lp_providers'])
+  ticks = serialize_engine.loads(snapshot['ticks'])
+  lp_providers = serialize_engine.loads(snapshot['lp_providers'])
   last_tick = snapshot['last_tick']
   latest_price = snapshot['latest_price']
   latest_price_x96 = snapshot['latest_price_x96']
   net_liquidity = snapshot['net_liquidity']
   net_usdc_fee = snapshot['net_usdc_fee']
   net_usdt_fee = snapshot['net_usdt_fee']
-  mint_ev_map = pickle.loads(snapshot['mint_ev_map'])
-  token_id_owner_map = pickle.loads(snapshot['token_id_owner_map'])
-  token_id_mint_map = pickle.loads(snapshot['token_id_mint_map'])
-  amount_swapped = pickle.loads(snapshot['amount_swapped'])
+  mint_ev_map = serialize_engine.loads(snapshot['mint_ev_map'])
+  token_id_owner_map = serialize_engine.loads(snapshot['token_id_owner_map'])
+  token_id_mint_map = serialize_engine.loads(snapshot['token_id_mint_map'])
+  amount_swapped = serialize_engine.loads(snapshot['amount_swapped'])
   deposited_sims = snapshot['deposited_sims'].copy()
   withdrawn_sims = snapshot['withdrawn_sims'].copy()
-  rebalancer_map = pickle.loads(snapshot['rebalancer_map'])
-  sim_usdt_balances = pickle.loads(snapshot['sim_usdt_balances'])
-  sim_usdc_balances = pickle.loads(snapshot['sim_usdc_balances'])
-  data_service = pickle.loads(snapshot['data_service'])
-  rebalance_counter = pickle.loads(snapshot['rebalance_counter'])
-  sim_balances_temp = pickle.loads(snapshot['sim_balances_temp'])
-  sim_balance_ranges = pickle.loads(snapshot['sim_balance_ranges'])
-  balance_changes = pickle.loads(snapshot['balance_changes'])
+  rebalancer_map = serialize_engine.loads(snapshot['rebalancer_map'])
+  sim_usdt_balances = serialize_engine.loads(snapshot['sim_usdt_balances'])
+  sim_usdc_balances = serialize_engine.loads(snapshot['sim_usdc_balances'])
+  data_service = serialize_engine.loads(snapshot['data_service'])
+  rebalance_counter = serialize_engine.loads(snapshot['rebalance_counter'])
+  sim_balances_temp = serialize_engine.loads(snapshot['sim_balances_temp'])
+  sim_balance_ranges = serialize_engine.loads(snapshot['sim_balance_ranges'])
+  balance_changes = serialize_engine.loads(snapshot['balance_changes'])
+  sim_earnings_per_block = serialize_engine.loads(snapshot['sim_earnings_per_block'])
 
   print("Snapshot loaded at block {}".format(block_number))
 
@@ -240,7 +248,7 @@ def handle_transfer_event(transfer_event):
 def handle_burn_event(event):
   return
 
-def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
+def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
   tick = ticks.get(str(tick_index), {
     'liquidity': 0,
     # 'usdc': 0,
@@ -251,6 +259,31 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
   tick_liquidity = int(tick['liquidity'])
   if tick_liquidity > 0:
     for addr in tick['positions'].keys():
+      is_simulation_address = addr.startswith("0xsim")
+      if is_simulation_address:
+        if 'earnings' not in sim_earnings_per_block.keys():
+          sim_earnings_per_block['earnings'] = {}
+        if addr not in sim_earnings_per_block['earnings'].keys():
+          sim_earnings_per_block['earnings'][addr] = []
+
+        earnings_per_block = sim_earnings_per_block['earnings'][addr]
+        # if empty array init value ranges for earnings
+        if not bool(earnings_per_block):
+          start_block = int(sim_earnings_per_block['start_block'])
+          end_block = int(sim_earnings_per_block['end_block'])
+          EARNINGS_RESOLUTION = sim_earnings_per_block['EARNINGS_RESOLUTION']
+          for i in range(EARNINGS_RESOLUTION):
+            chunk_size = (end_block - start_block) / EARNINGS_RESOLUTION
+            start_block_range = start_block + i * chunk_size
+            earnings_per_block.append({
+              "start_block_range": start_block_range,
+              "end_block_range": start_block_range + chunk_size - 1,
+              "usdc_profit": 0,
+              "usdt_profit": 0
+            })
+          sim_earnings_per_block['earnings'][addr] = earnings_per_block
+
+
       lp_provider = lp_providers.get(addr, {
         "net_liquidity": 0,
         # "usdc_net": 0,
@@ -260,9 +293,24 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee):
       })
 
       provided_liquidity = int(tick['positions'][addr]['liquidity'])
-      lp_provider["usdc_profit"] += math.floor(usdc_fee * provided_liquidity / tick_liquidity)
-      lp_provider["usdt_profit"] += math.floor(usdt_fee * provided_liquidity / tick_liquidity)
+      usdc_profit = math.floor(usdc_fee * provided_liquidity / tick_liquidity)
+      usdt_profit = math.floor(usdt_fee * provided_liquidity / tick_liquidity)
+      if is_simulation_address and usdc_profit < 0 and provided_liquidity < -2e6: 
+        print("WHAT IS GOING ON: ", usdc_fee, provided_liquidity, tick_liquidity)
+      elif usdc_profit < 0 and provided_liquidity < -2e6:
+        print("WHAT IS UP WITH OTHERS: ", usdc_fee, provided_liquidity, tick_liquidity)
 
+      lp_provider["usdc_profit"] += usdc_profit
+      lp_provider["usdt_profit"] += usdt_profit
+
+      if is_simulation_address:
+        for idx, earning_chunk in enumerate(sim_earnings_per_block['earnings'][addr]):
+          if earning_chunk['start_block_range'] < block_number and earning_chunk['end_block_range'] > block_number:
+            earning_chunk["usdc_profit"] += usdc_profit
+            earning_chunk["usdt_profit"] += usdt_profit
+            sim_earnings_per_block['earnings'][addr][idx] = earning_chunk
+            break;
+        
       lp_providers[addr] = lp_provider
 
 def handle_swap_event(event):
@@ -301,7 +349,7 @@ def handle_swap_event(event):
   net_usdt_fee += usdt_fee
 
   if not is_multi_tick:
-    distribute_fee_to_tick(curr_tick, usdc_fee, usdt_fee)
+    distribute_fee_to_tick(curr_tick, usdc_fee, usdt_fee, event['block_number'])
 
   else:
     direction = last_tick < curr_tick # True for forward
@@ -311,7 +359,7 @@ def handle_swap_event(event):
     usdt_fee_per_tick = usdt_fee / total_ticks
 
     for tick in range(min(last_tick, curr_tick), max(last_tick, curr_tick) + 1):
-      distribute_fee_to_tick(str(tick), usdc_fee_per_tick, usdt_fee_per_tick)
+      distribute_fee_to_tick(str(tick), usdc_fee_per_tick, usdt_fee_per_tick, event['block_number'])
         
   last_tick = curr_tick
   latest_price_x96 = sqrtPriceX96
@@ -402,7 +450,8 @@ def handle_simulation(block_number, scenario):
 
     data_service.set_position_data(address, (lower_tick_index, upper_tick_index))
 
-    rebalancer = Rebalancer(data_service, address, target_tick_range, rebalance_frequency)
+    #rebalancer = Rebalancer(data_service, address, target_tick_range, rebalance_frequency)
+    rebalancer = CustomRebalancer(data_service, address, target_tick_range, rebalance_frequency)
     rebalancer_map[address] = rebalancer
 
   elif address not in withdrawn_sims and withdraw_before > 0 and withdraw_before >= block_number:
@@ -471,6 +520,11 @@ def handle_rebalances():
     liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
 
     (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
+
+    is_simulation_address = address.startswith("0xsim")
+    if is_simulation_address and usdt_added > max_usdt:
+      print("MISTAKAS!")
+
     sim_usdc_balances[address] -= usdc_added
     sim_usdt_balances[address] -= usdt_added
 
@@ -580,7 +634,7 @@ def store_results(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
     str(current_value), # Current Deposit Value
     str(round(diff, 2)), # Diff in Deposit Value
     str(round(net_fee / 1e6, 2)), # Net Fee Earned
-    str(round(aave_profits / 1e6, 2)), # Aave profits
+    str(round(aave_profits, 2)), # Aave profits
     str(rebalance_counter.get(address, {}).get('count')), # Total Re-balances
     str(round(liquidity, 2)), # Net Liquidity
     str(round(growth, 2)) + "%", # growth
@@ -651,32 +705,63 @@ def print_results():
     "Fee"
   ]] + usdt_table_data, double_hline = True)
 
-  print_apy_chart()
+  #print_apy_chart()
+  print_earnings_per_block(scenarios[0])
 
+def print_earnings_per_block(scenario):
+  earnings = sim_earnings_per_block['earnings'][scenario['address']];
+
+  fig = plt.figure()
+  ax = fig.add_subplot(111)
+
+  plt.xlabel('Blocks')
+  plt.ylabel('Earnings')
+
+  X = []
+  Y = []
+
+  for earning in earnings:
+    X.append(earning['start_block_range'])
+    Y.append(earning['usdc_profit'] + earning['usdt_profit'])
+
+  ax.plot(X,Y)
+  ax.grid()
+  plt.title("Earning per block {}".format(scenario['address']))
+  plt.show()
 
 def print_apy_chart():
   fig = plt.figure()
-
   ax = fig.add_subplot(111)
 
   plt.xlabel('Funds Deployed [million]')
   plt.ylabel('Total APY [%]')
 
   X = []
-  Y = []
+  TOTAL_APY_W_GAS = []
+  RAW_UNISWAP_POOL_APY = []
+  TOTAL_APY_NO_GAS = []
+  AAVE_APY = []
   for scenario in scenarios:
     X += [(scenario['usdc_amount'] + scenario['usdt_amount']) / 1e6]
     #Y += [round(scenario['results']['apy'] * 100, 2)]
-    Y += [round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)]
+    TOTAL_APY_W_GAS += [round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)]
+    RAW_UNISWAP_POOL_APY += [round(scenario['results']['total_apy'] * 100, 2)]
+    TOTAL_APY_NO_GAS += [round(scenario['results']['apy'] * 100, 2)]
+    AAVE_APY += [round(scenario['results']['aave_apy'] * 100, 2)]
 
 
-  ax.plot(X,Y)
-  for index, xy in enumerate(zip(X, Y)):
-    scenario = scenarios[index]
-    #ax.annotate('(%s, %s)' % xy, xy=xy, textcoords='data') # <--
-    #ax.annotate('{}'.format(scenario['address']), xy=xy, textcoords='data') # <--
-    ax.annotate('{}'.format(round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)), xy=xy, textcoords='data')
+  ax.plot(X,TOTAL_APY_W_GAS, label="APY w/ gas")
+  ax.plot(X,TOTAL_APY_NO_GAS, label="APY no gas")
+  ax.plot(X,RAW_UNISWAP_POOL_APY, label="Raw Uniswap pool APY")
+  ax.plot(X,AAVE_APY, label="APY from Aave")
 
+  # for index, xy in enumerate(zip(X, Y)):
+  #   scenario = scenarios[index]
+  #   #ax.annotate('(%s, %s)' % xy, xy=xy, textcoords='data') # <--
+  #   #ax.annotate('{}'.format(scenario['address']), xy=xy, textcoords='data') # <--
+  #   ax.annotate('{}'.format(round(scenario['results']['total_apy_w_rebalance_gas'] * 100, 2)), xy=xy, textcoords='data')
+
+  ax.legend()
   ax.grid()
 
   plt.show()
@@ -737,19 +822,38 @@ def record_token_balance_changes(block_number, forceRecord=False):
         previous_balance_change_info['block_number_end'] = block_number - 1
 
 async def add_block_range_times_to_balance_changes(balance_change, sim_balance_ranges):
-  for token in balance_changes:
-    for sim_address in balance_changes[token]:
-      changes_array = balance_changes[token][sim_address]
-      for index, change_item in enumerate(changes_array):
-        # skip first item
-        if index == 0:
-          continue
-        prev_change = balance_changes[token][sim_address][index - 1]
-        prev_change['block_range_time_diff'] = await getBlockTimeDiff(prev_change['block_number'], change_item['block_number'] - 1)
+  # There is a bug in CTC and we need to group block numbers together otherwise it hits the
+  # limit of number of open SqlLite connections. So we do 2 passes. In first pass we fetch all 
+  # the block numbers. In second pass we use the fetched blocks
+  block_numbers = []
+  blk_to_time = {}
+  for first_pass in [True, False]:
+    for token in balance_changes:
+      for sim_address in balance_changes[token]:
+        changes_array = balance_changes[token][sim_address]
+        for index, change_item in enumerate(changes_array):
+          # skip first item
+          if index == 0:
+            continue
 
-  for sim_address in sim_balance_ranges:
-    sim_range = sim_balance_ranges[sim_address]
-    sim_range['block_range_time_diff'] = await getBlockTimeDiff(sim_range['first_block_number'], sim_range['last_block_number'])
+          if first_pass:
+            prev_change = balance_changes[token][sim_address][index - 1]
+            block_numbers.append(prev_change['block_number'])
+            block_numbers.append(change_item['block_number'])
+          else:
+            prev_change = balance_changes[token][sim_address][index - 1]
+            prev_change['block_range_time_diff'] = blk_to_time[change_item['block_number']] - blk_to_time[prev_change['block_number']] - 1
+
+    for sim_address in sim_balance_ranges:
+      sim_range = sim_balance_ranges[sim_address]
+      if first_pass:
+        block_numbers.append(sim_range['first_block_number'])
+        block_numbers.append(sim_range['last_block_number'])
+      else:
+        sim_range['block_range_time_diff'] = blk_to_time[sim_range['last_block_number']] - blk_to_time[sim_range['first_block_number']]
+
+    if first_pass:
+      blk_to_time = await blockNumberListToTimestamp(block_numbers)
 
   return [balance_changes, sim_balance_ranges]
 
@@ -757,19 +861,17 @@ def to_apy(apr, days=30.00):
     periods_per_year = Decimal(365.25 / days)
     return ((1 + Decimal(apr) / periods_per_year / 100) ** periods_per_year - 1) * 100
 
-# Testing has demonstrated that we need to preload 2.7 mio of blocks before starting the simulation
-# to `pre-warm` the Uniswap pool with balances in a way that the simulation can be ran on a close
-# to mainnet state
 
-CONST_PREWARM_BLOCKS = 2700000
-#CONST_PREWARM_BLOCKS = 270000
-async def simulate(start_block, end_block):
+async def simulate(start_block, end_block, CONST_PREWARM_BLOCKS, EARNINGS_RESOLUTION):
   if (start_block > end_block):
     raise Exception("start_block needs to be larger than end_block")
 
   global deposit_after
   global prewarm_done
   deposit_after = int(start_block)
+  sim_earnings_per_block['start_block'] = start_block
+  sim_earnings_per_block['end_block'] = end_block
+  sim_earnings_per_block['EARNINGS_RESOLUTION'] = EARNINGS_RESOLUTION
 
   print("Found {} scenarios to simulate".format(len(scenarios)))
   for scenario_index, scenario in enumerate(scenarios):
