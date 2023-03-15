@@ -26,20 +26,20 @@ def get_amount1_for_liquidity(ratio_a, ratio_b, liquidity):
 
   return math.floor(liquidity * (ratio_b - ratio_a))
 
-def get_liquidity_amounts(sqrt_ratio_curr, sqrt_ratio_a, sqrt_ratio_b, amount0, amount1):
-  if sqrt_ratio_a > sqrt_ratio_b:
-    (sqrt_ratio_a, sqrt_ratio_b) = (sqrt_ratio_b, sqrt_ratio_a)
+def get_liquidity_amounts(sqrt_ratio_curr, ratio_a, ratio_b, amount0, amount1):
+  if ratio_a > ratio_b:
+    (ratio_a, ratio_b) = (ratio_b, ratio_a)
 
   liquidity = 0
 
-  if sqrt_ratio_curr <= sqrt_ratio_a:
-    liquidity = get_liquidity_for_amount0(sqrt_ratio_a, sqrt_ratio_b, amount0)
-  elif sqrt_ratio_curr < sqrt_ratio_b:
-    liquidity0 = get_liquidity_for_amount0(sqrt_ratio_curr, sqrt_ratio_b, amount0)
-    liquidity1 = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_curr, amount1)
+  if sqrt_ratio_curr <= ratio_a:
+    liquidity = get_liquidity_for_amount0(ratio_a, ratio_b, amount0)
+  elif sqrt_ratio_curr < ratio_b:
+    liquidity0 = get_liquidity_for_amount0(sqrt_ratio_curr, ratio_b, amount0)
+    liquidity1 = get_liquidity_for_amount1(ratio_a, sqrt_ratio_curr, amount1)
     liquidity = liquidity0 if liquidity0 < liquidity1 else liquidity1
   else:
-    liquidity = get_liquidity_for_amount1(sqrt_ratio_a, sqrt_ratio_b, amount1)
+    liquidity = get_liquidity_for_amount1(ratio_a, ratio_b, amount1)
   
   return liquidity
 
