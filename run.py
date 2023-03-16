@@ -6,8 +6,8 @@ from simulator import simulate
 # to `pre-warm` the Uniswap pool with balances in a way that the simulation can be ran on a close
 # to mainnet state
 #CONST_PREWARM_BLOCKS = 2700000
-#CONST_PREWARM_BLOCKS = 1000000
-CONST_PREWARM_BLOCKS = 27000
+CONST_PREWARM_BLOCKS = 1000000
+#CONST_PREWARM_BLOCKS = 27000
 
 # in how many brackets per simulation to split the fee earnings to
 EARNINGS_RESOLUTION = 100

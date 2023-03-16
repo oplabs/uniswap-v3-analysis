@@ -52,8 +52,6 @@ balance_changes = {
   'USDT': {},
   'USDC': {}
 }
-# simulation earnings broken down by block ranges
-sim_earnings_per_block = {}
 #### end of Snapshot-able Global vars ####
 
 #### NON Snapshot-able Global vars ####
@@ -68,6 +66,9 @@ usdt_table_data = []
 
 serialize_engine = pickle
 #serialize_engine = ujson
+
+# simulation earnings broken down by block ranges
+sim_per_block_data = {}
 
 # saves a snapshot of the global state
 def save_snapshot(block_number):
@@ -95,7 +96,6 @@ def save_snapshot(block_number):
     'sim_balances_temp': serialize_engine.dumps(sim_balances_temp, -1),
     'sim_balance_ranges': serialize_engine.dumps(sim_balance_ranges, -1),
     'balance_changes': serialize_engine.dumps(balance_changes, -1),
-    'sim_earnings_per_block': serialize_engine.dumps(sim_earnings_per_block, -1),
   }
   print("Saving snapshot at block {}".format(block_number))
 
@@ -122,7 +122,6 @@ def load_snapshot(block_number):
   global sim_balances_temp
   global sim_balance_ranges
   global balance_changes
-  global sim_earnings_per_block
 
   ticks = serialize_engine.loads(snapshot['ticks'])
   lp_providers = serialize_engine.loads(snapshot['lp_providers'])
@@ -146,7 +145,6 @@ def load_snapshot(block_number):
   sim_balances_temp = serialize_engine.loads(snapshot['sim_balances_temp'])
   sim_balance_ranges = serialize_engine.loads(snapshot['sim_balance_ranges'])
   balance_changes = serialize_engine.loads(snapshot['balance_changes'])
-  sim_earnings_per_block = serialize_engine.loads(snapshot['sim_earnings_per_block'])
 
   print("Snapshot loaded at block {}".format(block_number))
 
@@ -249,6 +247,8 @@ def handle_burn_event(event):
   return
 
 def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
+  global sim_per_block_data
+
   tick = ticks.get(str(tick_index), {
     'liquidity': 0,
     # 'usdc': 0,
@@ -261,17 +261,17 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
     for addr in tick['positions'].keys():
       is_simulation_address = addr.startswith("0xsim")
       if is_simulation_address:
-        if 'earnings' not in sim_earnings_per_block.keys():
-          sim_earnings_per_block['earnings'] = {}
-        if addr not in sim_earnings_per_block['earnings'].keys():
-          sim_earnings_per_block['earnings'][addr] = []
+        if 'earnings' not in sim_per_block_data.keys():
+          sim_per_block_data['earnings'] = {}
+        if addr not in sim_per_block_data['earnings'].keys():
+          sim_per_block_data['earnings'][addr] = []
 
-        earnings_per_block = sim_earnings_per_block['earnings'][addr]
+        earnings_per_block = sim_per_block_data['earnings'][addr]
         # if empty array init value ranges for earnings
         if not bool(earnings_per_block):
-          start_block = int(sim_earnings_per_block['start_block'])
-          end_block = int(sim_earnings_per_block['end_block'])
-          EARNINGS_RESOLUTION = sim_earnings_per_block['EARNINGS_RESOLUTION']
+          start_block = int(sim_per_block_data['start_block'])
+          end_block = int(sim_per_block_data['end_block'])
+          EARNINGS_RESOLUTION = sim_per_block_data['EARNINGS_RESOLUTION']
           for i in range(EARNINGS_RESOLUTION):
             chunk_size = (end_block - start_block) / EARNINGS_RESOLUTION
             start_block_range = start_block + i * chunk_size
@@ -279,9 +279,13 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
               "start_block_range": start_block_range,
               "end_block_range": start_block_range + chunk_size - 1,
               "usdc_profit": 0,
-              "usdt_profit": 0
+              "usdt_profit": 0,
+              "total_value": 0,
+              "total_value_diff": 0
             })
-          sim_earnings_per_block['earnings'][addr] = earnings_per_block
+          sim_per_block_data['earnings'][addr] = earnings_per_block
+
+
 
 
       lp_provider = lp_providers.get(addr, {
@@ -295,20 +299,30 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
       provided_liquidity = int(tick['positions'][addr]['liquidity'])
       usdc_profit = math.floor(usdc_fee * provided_liquidity / tick_liquidity)
       usdt_profit = math.floor(usdt_fee * provided_liquidity / tick_liquidity)
-      if is_simulation_address and usdc_profit < 0 and provided_liquidity < -2e6: 
-        print("WHAT IS GOING ON: ", usdc_fee, provided_liquidity, tick_liquidity)
-      elif usdc_profit < 0 and provided_liquidity < -2e6:
-        print("WHAT IS UP WITH OTHERS: ", usdc_fee, provided_liquidity, tick_liquidity)
 
       lp_provider["usdc_profit"] += usdc_profit
       lp_provider["usdt_profit"] += usdt_profit
 
       if is_simulation_address:
-        for idx, earning_chunk in enumerate(sim_earnings_per_block['earnings'][addr]):
+        for idx, earning_chunk in enumerate(sim_per_block_data['earnings'][addr]):
           if earning_chunk['start_block_range'] < block_number and earning_chunk['end_block_range'] > block_number:
+            # add the profits info
             earning_chunk["usdc_profit"] += usdc_profit
             earning_chunk["usdt_profit"] += usdt_profit
-            sim_earnings_per_block['earnings'][addr][idx] = earning_chunk
+
+            # add the total_value info (it might be re-written multiple times but that is ok)
+            data = lp_providers.get(addr.lower())
+            if data is None:
+              continue
+            usdc_fee, usdt_fee, usdc_bal, usdt_bal, liquidity, usdc_for_liquidity, usdt_for_liquidity, net_usdc, net_usdt, net_fee, initial_usdc, initial_usdt = get_stats_from_data(data, addr)
+
+            initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
+            current_value = math.floor((net_usdc + net_usdt) / 10**6)
+            earning_chunk["total_value_diff"] = current_value - initial_deposit
+            earning_chunk["total_value"] = current_value
+
+            sim_per_block_data['earnings'][addr][idx] = earning_chunk
+              
             break;
         
       lp_providers[addr] = lp_provider
@@ -545,35 +559,21 @@ def calculate_aave_profits(non_deployed_apy, sim_balance_ranges_w_time, sim_addr
 
   return profits
 
-def store_results(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
-  global table_data
-  global apy_table_data
-  global usdc_table_data
-  global usdt_table_data
-  global amount_swapped
+def get_stats_from_data(data, address):
+  scenario = False
+  for scen in scenarios:
+    if scen['address'] == address:
+      scenario = scen
+      break
 
-  print("Total amount of funds swapped withing a tick: {} across ticks: {} ratio: {}".format(amount_swapped['within_tick'] / 1e6, amount_swapped['accross_ticks'] / 1e6, (amount_swapped['accross_ticks']/amount_swapped['within_tick'])))
-  address = scenario["address"]
   initial_usdc = scenario["usdc_amount"] * 10**6
   initial_usdt = scenario["usdt_amount"] * 10**6
-  non_deployed_apy = scenario["non_deployed_apy"]
-
-  data = lp_providers.get(address.lower())
-  # how long were the funds active in the Uniswap
-  simulation_active_time = sim_balance_ranges_w_time[address]['block_range_time_diff']
-  seconds_in_a_year = 86400 * 365.25
-
-  if data is None:
-    print("\tNOT FOUND")
-    return
 
   usdc_fee = data["usdc_profit"]
   usdt_fee = data["usdt_profit"]
   usdc_bal = sim_usdc_balances[address]
   usdt_bal = sim_usdt_balances[address]
   liquidity = data["net_liquidity"]
-
-  aave_profits = calculate_aave_profits(non_deployed_apy, balance_changes_w_time, address) / 10**6
 
   event = token_id_mint_map[address]
   lower_tick = event["arg__tickLower"]
@@ -586,7 +586,34 @@ def store_results(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
   net_usdc = usdc_for_liquidity + usdc_fee + usdc_bal
   net_usdt = usdt_for_liquidity + usdt_fee + usdt_bal
   net_fee = usdc_fee + usdt_fee
+
+  return [usdc_fee, usdt_fee, usdc_bal, usdt_bal, liquidity, usdc_for_liquidity, usdt_for_liquidity, net_usdc, net_usdt, net_fee, initial_usdc, initial_usdt]
+
+def store_results(scenario, balance_changes_w_time, sim_balance_ranges_w_time):
+  global table_data
+  global apy_table_data
+  global usdc_table_data
+  global usdt_table_data
+  global amount_swapped
+
+  print("Total amount of funds swapped withing a tick: {} across ticks: {} ratio: {}".format(amount_swapped['within_tick'] / 1e6, amount_swapped['accross_ticks'] / 1e6, (amount_swapped['accross_ticks']/amount_swapped['within_tick'])))
+  address = scenario["address"]
+  non_deployed_apy = scenario["non_deployed_apy"]
+
+  # how long were the funds active in the Uniswap
+  simulation_active_time = sim_balance_ranges_w_time[address]['block_range_time_diff']
+  seconds_in_a_year = 86400 * 365.25
+
+  data = lp_providers.get(address.lower())
+  if data is None:
+    print("\tNOT FOUND")
+    return
+
+  usdc_fee, usdt_fee, usdc_bal, usdt_bal, liquidity, usdc_for_liquidity, usdt_for_liquidity, net_usdc, net_usdt, net_fee, initial_usdc, initial_usdt = get_stats_from_data(data, address)
+
   rebalance_cost = rebalance_counter.get(address, {}).get('cost', 0) / 1e6
+
+  aave_profits = calculate_aave_profits(non_deployed_apy, balance_changes_w_time, address) / 10**6
 
   initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
   current_value = math.floor((net_usdc + net_usdt) / 10**6)
@@ -704,24 +731,29 @@ def print_results():
   print_earnings_per_block(scenarios[0])
 
 def print_earnings_per_block(scenario):
-  earnings = sim_earnings_per_block['earnings'][scenario['address']];
+  earnings = sim_per_block_data['earnings'][scenario['address']];
 
-  fig = plt.figure()
-  ax = fig.add_subplot(111)
-
-  plt.xlabel('Blocks')
-  plt.ylabel('Earnings')
+  fig, ax1 = plt.subplots()
+  ax2 = ax1.twinx()
 
   X = []
   Y = []
+  Y2 = []
 
   for earning in earnings:
     X.append(earning['start_block_range'])
     Y.append(earning['usdc_profit'] + earning['usdt_profit'])
+    Y2.append(earning['total_value_diff'])
 
-  ax.plot(X,Y)
-  ax.grid()
-  plt.title("Earning per block {}".format(scenario['address']))
+  ax1.plot(X,Y, 'g-')
+  ax1.grid()
+  ax2.plot(X,Y2, 'b-')
+
+  ax1.set_xlabel('Blocks')
+  ax1.set_ylabel('Earnings', color='g')
+  ax2.set_ylabel('Total Value Difference', color='b')
+
+  plt.title("Earnings & Total Value Difference per block {}".format(scenario['address']))
   plt.show()
 
 def print_apy_chart():
@@ -864,9 +896,9 @@ async def simulate(start_block, end_block, CONST_PREWARM_BLOCKS, EARNINGS_RESOLU
   global deposit_after
   global prewarm_done
   deposit_after = int(start_block)
-  sim_earnings_per_block['start_block'] = start_block
-  sim_earnings_per_block['end_block'] = end_block
-  sim_earnings_per_block['EARNINGS_RESOLUTION'] = EARNINGS_RESOLUTION
+  sim_per_block_data['start_block'] = start_block
+  sim_per_block_data['end_block'] = end_block
+  sim_per_block_data['EARNINGS_RESOLUTION'] = EARNINGS_RESOLUTION
 
   print("Found {} scenarios to simulate".format(len(scenarios)))
   for scenario_index, scenario in enumerate(scenarios):
