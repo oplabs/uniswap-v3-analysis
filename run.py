@@ -5,9 +5,10 @@ from simulator import simulate
 # Testing has demonstrated that we need to preload 2.7 mio of blocks before starting the simulation
 # to `pre-warm` the Uniswap pool with balances in a way that the simulation can be ran on a close
 # to mainnet state
-CONST_PREWARM_BLOCKS = 2700000
-#CONST_PREWARM_BLOCKS = 1000000
-#CONST_PREWARM_BLOCKS =  270000
+
+CONST_PREWARM_BLOCKS = 2700000 # full pool pre-warm
+#CONST_PREWARM_BLOCKS = 1000000 # close to full pool pre-warm
+#CONST_PREWARM_BLOCKS =  270000 # quick prewarm -> not accurate data
 
 # in how many brackets per simulation to split the fee earnings to
 EARNINGS_RESOLUTION = 100
