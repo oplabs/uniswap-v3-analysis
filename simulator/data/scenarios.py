@@ -18,8 +18,8 @@ deposit_liquidities = [
     # (6000000, 6000000),
 ]
 tick_ranges = [
-  #1,
-  2, 
+  1,
+  #2, 
   #4, 
   #8, 
   #10, 

@@ -5,11 +5,12 @@ class SimulatorDataService:
     self._latest_tick = None
     self._latest_block = None
     self._scheduled_rebalances = []
+    self._scheduled_swaps = []
     self._paused_positions = set()
 
-  def request_rebalance(self, position_id, desired_lower_tick, desired_upper_tick):
+  def request_rebalance(self, position_id, desired_lower_tick, desired_upper_tick, swap_tokens):
     self._scheduled_rebalances.append(
-      [position_id, desired_lower_tick, desired_upper_tick]
+      [position_id, desired_lower_tick, desired_upper_tick, swap_tokens]
     )
 
   def get_position_data(self, position_id):

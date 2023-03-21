@@ -281,7 +281,10 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
               "usdc_profit": 0,
               "usdt_profit": 0,
               "total_value": 0,
-              "total_value_diff": 0
+              "total_value_diff": 0,
+              "pct_liquidity_deployed": 0,
+              "usdc_balance": 0,
+              "usdt_balance": 0,
             })
           sim_per_block_data['earnings'][addr] = earnings_per_block
 
@@ -316,10 +319,14 @@ def distribute_fee_to_tick(tick_index, usdc_fee, usdt_fee, block_number):
               continue
             usdc_fee, usdt_fee, usdc_bal, usdt_bal, liquidity, usdc_for_liquidity, usdt_for_liquidity, net_usdc, net_usdt, net_fee, initial_usdc, initial_usdt = get_stats_from_data(data, addr)
 
-            initial_deposit = math.floor((initial_usdc + initial_usdt) / 10**6)
-            current_value = math.floor((net_usdc + net_usdt) / 10**6)
+            initial_deposit = math.floor((initial_usdc + initial_usdt) / 1e6)
+            current_value = math.floor((net_usdc + net_usdt) / 1e6)
             earning_chunk["total_value_diff"] = current_value - initial_deposit
             earning_chunk["total_value"] = current_value
+            token_balances = (usdt_bal + usdc_bal) / 1e6
+            earning_chunk["usdc_balance"] = usdc_bal / 1e6
+            earning_chunk["usdt_balance"] = usdt_bal / 1e6
+            earning_chunk["pct_liquidity_deployed"] = (1 - token_balances / current_value)
 
             sim_per_block_data['earnings'][addr][idx] = earning_chunk
               
@@ -465,7 +472,7 @@ def handle_simulation(block_number, scenario):
     data_service.set_position_data(address, (lower_tick_index, upper_tick_index))
 
     #rebalancer = Rebalancer(data_service, address, target_tick_range, rebalance_frequency)
-    rebalancer = CustomRebalancer(data_service, address, target_tick_range, rebalance_frequency)
+    rebalancer = CustomRebalancer(data_service, token_id, target_tick_range, rebalance_frequency, lp_providers, sim_usdc_balances, sim_usdt_balances, address, pool_fee)
     rebalancer_map[address] = rebalancer
 
   elif address not in withdrawn_sims and withdraw_before > 0 and withdraw_before >= block_number:
@@ -486,9 +493,24 @@ def handle_simulation(block_number, scenario):
     sim_usdc_balances[address] += usdc_amount
     sim_usdt_balances[address] += usdt_amount
 
+def swap(address):
+  usdc_balance = sim_usdc_balances[address]
+  usdt_balance = sim_usdt_balances[address]
+  total = usdc_balance + usdt_balance
+  
+  if usdc_balance > usdt_balance:
+    amountToSwap = usdc_balance - total / 2
+    sim_usdc_balances[address] = usdc_balance - amountToSwap
+    sim_usdt_balances[address] = usdt_balance + amountToSwap * (1 - pool_fee)
+  else:
+    amountToSwap = usdt_balance - total / 2
+    sim_usdc_balances[address] = usdc_balance + amountToSwap * (1 - pool_fee)
+    sim_usdt_balances[address] = usdt_balance - amountToSwap
+
+
 def handle_rebalances():
   rebalance_requests = data_service.get_rebalance_requests()
-  for [address, lower_tick, upper_tick] in rebalance_requests:
+  for [address, lower_tick, upper_tick, swap_tokens] in rebalance_requests:
     address = address
     token_id = address
     provider = lp_providers.get(address)
@@ -521,6 +543,9 @@ def handle_rebalances():
     sim_usdc_balances[address] = max_usdc
     sim_usdt_balances[address] = max_usdt
 
+    if swap_tokens:
+      swap(address)
+
     event = {
       "arg__tickLower": lower_tick,
       "arg__tickUpper": upper_tick,
@@ -531,7 +556,7 @@ def handle_rebalances():
     ratio_a = get_sqrt_ratio_at_tick(lower_tick)
     ratio_b = get_sqrt_ratio_at_tick(upper_tick)
 
-    liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, max_usdc, max_usdt)
+    liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, sim_usdc_balances[address], sim_usdt_balances[address])
     (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
 
     sim_usdc_balances[address] -= usdc_added
@@ -566,8 +591,8 @@ def get_stats_from_data(data, address):
       scenario = scen
       break
 
-  initial_usdc = scenario["usdc_amount"] * 10**6
-  initial_usdt = scenario["usdt_amount"] * 10**6
+  initial_usdc = scenario["usdc_amount"] * 1e6
+  initial_usdt = scenario["usdt_amount"] * 1e6
 
   usdc_fee = data["usdc_profit"]
   usdt_fee = data["usdt_profit"]
@@ -734,24 +759,34 @@ def print_earnings_per_block(scenario):
   earnings = sim_per_block_data['earnings'][scenario['address']];
 
   fig, ax1 = plt.subplots()
+  fig.subplots_adjust(right=0.75)
+
   ax2 = ax1.twinx()
+  ax3 = ax1.twinx()
 
   X = []
   Y = []
   Y2 = []
+  Y3 = []
 
   for earning in earnings:
     X.append(earning['start_block_range'])
     Y.append(earning['usdc_profit'] + earning['usdt_profit'])
     Y2.append(earning['total_value_diff'])
+    Y3.append(earning['pct_liquidity_deployed'])
+
+  ax3.spines.right.set_position(("axes", 1.2))
 
   ax1.plot(X,Y, 'g-')
   ax1.grid()
   ax2.plot(X,Y2, 'b-')
+  ax3.plot(X,Y3, 'r-')
+  ax3.set_ylim(0, 1)
 
   ax1.set_xlabel('Blocks')
   ax1.set_ylabel('Earnings', color='g')
   ax2.set_ylabel('Total Value Difference', color='b')
+  ax3.set_ylabel('\% Liquidity Deployed', color='r')
 
   plt.title("Earnings & Total Value Difference per block {}".format(scenario['address']))
   plt.show()
