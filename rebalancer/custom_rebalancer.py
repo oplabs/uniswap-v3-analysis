@@ -57,8 +57,8 @@ class CustomRebalancer:
 
 
     #self.simpleRebalanceStrategy(current_position, latest_block, latest_tick, is_active, self.out_of_bounds_since, position_paused, rebalance_pending, can_rebalance, inactive_for)
-    self.simpleRebalanceStrategyV2(current_position, latest_block, latest_tick, is_active, self.out_of_bounds_since, position_paused, rebalance_pending, can_rebalance, inactive_for)
-    #self.simpleRebalanceStrategyV3(current_position, latest_block, latest_tick, is_active, self.out_of_bounds_since, position_paused, rebalance_pending, can_rebalance, inactive_for)
+    #self.simpleRebalanceStrategyV2(current_position, latest_block, latest_tick, is_active, self.out_of_bounds_since, position_paused, rebalance_pending, can_rebalance, inactive_for)
+    self.simpleRebalanceStrategyV3(current_position, latest_block, latest_tick, is_active, self.out_of_bounds_since, position_paused, rebalance_pending, can_rebalance, inactive_for)
 
   # just rebalance if tick is not active and has been inactive for #rebalance_frequency block range
   def simpleRebalanceStrategy(

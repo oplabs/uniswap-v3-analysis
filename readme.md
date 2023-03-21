@@ -16,16 +16,17 @@ pip3 install ctc && ctc config && ctc setup
 ```
 
 ## Simulation
-Update `simulator/data/scenarios.py` and then run:
+Update `simulator/data/scenarios.py`:
+- It is suggested that one tick range, one deposit liquidity and one rebase frequency is used (even though multiple can be selected in the array)
+- in run.py select the CONST_PREWARM_BLOCKS required. It is suggested to pick a smaller block range for when new functionality is tested out. And full pool prewarm when exact data is required
+- pick start_block -> end_block range of the simulation
+- open custom_rebalancer.py and create a more efficient rebalancing strategy if required
+
+after the configuration is set run it with:
 
 ```
 python3 run.py
 ```
-
-- It is suggested that one tick range, one deposit liquidity and one rebase frequency is used.
-- in run.py select the CONST_PREWARM_BLOCKS required. It is suggested to pick a smaller block range for when new functionality is tested out. And full pool prewarm when exact data is required
-- pick start_block -> end_block range of the simulation
-- open custom_rebalancer.py and create a more efficient rebalancing strategy
 
 ## Plan
 ```

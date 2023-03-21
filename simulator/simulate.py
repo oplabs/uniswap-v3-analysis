@@ -493,7 +493,10 @@ def handle_simulation(block_number, scenario):
     sim_usdc_balances[address] += usdc_amount
     sim_usdt_balances[address] += usdt_amount
 
-def swap(address):
+def swap(address, ratio_curr, ratio_a, ratio_b):
+  # TODO: swap tokens in a manner that they can be effectively deployed instead of 
+  # aiming for 50/50 split
+  #(usdc_share, usdt_share) = get_amounts_for_liquidity(ratio_curr, ratio_a, ratio_b)
   usdc_balance = sim_usdc_balances[address]
   usdt_balance = sim_usdt_balances[address]
   total = usdc_balance + usdt_balance
@@ -543,9 +546,6 @@ def handle_rebalances():
     sim_usdc_balances[address] = max_usdc
     sim_usdt_balances[address] = max_usdt
 
-    if swap_tokens:
-      swap(address)
-
     event = {
       "arg__tickLower": lower_tick,
       "arg__tickUpper": upper_tick,
@@ -555,6 +555,9 @@ def handle_rebalances():
     ratio_curr = latest_price_x96 / 2**96
     ratio_a = get_sqrt_ratio_at_tick(lower_tick)
     ratio_b = get_sqrt_ratio_at_tick(upper_tick)
+
+    if swap_tokens:
+      swap(address, ratio_curr, ratio_a, ratio_b)
 
     liquidity_to_add = get_liquidity_amounts(ratio_curr, ratio_a, ratio_b, sim_usdc_balances[address], sim_usdt_balances[address])
     (usdc_added, usdt_added) = increase_liquidity(token_id, liquidity_to_add)
