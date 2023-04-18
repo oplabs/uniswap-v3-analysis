@@ -3,7 +3,6 @@ import copy
 from decimal import Decimal
 from utils.const import pool_fee, usd_gas_estimate
 import pickle
-import ujson
 from matplotlib import pyplot as plt
 
 from .data import collect, scenarios, SimulatorDataService
@@ -65,7 +64,6 @@ usdc_table_data = []
 usdt_table_data = []
 
 serialize_engine = pickle
-#serialize_engine = ujson
 
 # simulation earnings broken down by block ranges
 sim_per_block_data = {}
